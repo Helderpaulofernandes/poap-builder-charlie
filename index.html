@@ -938,7 +938,8 @@ function tagFmt(it, st) {
   const f = {}; for (const k of TAG_KEYS) f[k] = it[k] ?? st[k] ?? TAG_DEFAULTS[k];
   const stroke = it.stroke || st.stroke || BRAND.navy;
   f.fillColour = f.tagFill || stroke;
-  f.textColour = f.tagText || (f.tagStyle === "pill" ? "#FFFFFF" : f.fillColour);
+  // a large upright label sits on the shade itself: automatic text is whatever reads on it
+  f.textColour = f.tagText || (f.tagPos === "inside" ? textOn(it.fill || st.fill || "#FFFFFF") : f.tagStyle === "pill" ? "#FFFFFF" : f.fillColour);
   return f;
 }
 /* x position, size and stacking row of every curtain tag; rows stop tags in the same position overlapping */
@@ -1168,12 +1169,15 @@ function curtainColours(it) {
   const st = styleOf(P, it.style);
   return { st, fill: it.fill || st.fill || BRAND.orange, stroke: it.stroke || st.stroke || BRAND.navy, opacity: it.opacity ?? st.opacity ?? 0.18 };
 }
-/* the rows a curtain covers: every lane, or only the lanes from it.zone[0] to it.zone[1] (e.g. a T&C zone over the platforms) */
+/* the rows a curtain covers: it.zone = [top lane, bottom lane], where "" (or a lane since deleted) is that edge of the
+   sheet, e.g. a T&C zone over the platforms, or a curtain from the top down to one lane */
 function curtainY(it, L) {
-  if (Array.isArray(it.zone) && it.zone.length) {
-    const ls = L.lanes.filter(x => it.zone.includes(x.l.id)).sort((a, b) => a.y - b.y);
-    const a = ls[0], b = ls[ls.length - 1] || a;
-    if (a) { const i0 = L.lanes.indexOf(a), i1 = L.lanes.indexOf(b); return [L.lanes[Math.min(i0, i1)].y, L.lanes[Math.max(i0, i1)].y + L.lanes[Math.max(i0, i1)].h]; }
+  const z = Array.isArray(it.zone) ? (it.zone.length === 1 ? [it.zone[0], it.zone[0]] : it.zone) : null;
+  if (z && z.some(Boolean)) {
+    const at = id => id ? L.lanes.findIndex(x => x.l.id === id) : -1;
+    let a = at(z[0]), b = at(z[1]);
+    if (a >= 0 && b >= 0 && a > b) [a, b] = [b, a];
+    if (a >= 0 || b >= 0) return [a >= 0 ? L.lanes[a].y : L.stripTop, b >= 0 ? L.lanes[b].y + L.lanes[b].h : L.bodyBottom];
   }
   return [L.stripTop, L.bodyBottom];
 }
@@ -1210,7 +1214,8 @@ function drawCurtainShades(svg, curtains, L, opts = {}, F = { font: sheetFace() 
       let size = Math.max(9, Math.min(26, w * (sub ? .32 : .48)));
       while (size > 8 && textW(it.name, size, 700) > room) size -= .5;
       let ss = size * .62; while (ss > 7 && textW(sub, ss, 500) > room) ss -= .5;
-      const ink = textOn(fill), tg = el("g", { transform: `rotate(-90 ${cx} ${cy})` }, g);
+      // the tag's text colour when one is set, else whatever reads on the shade
+      const ink = tagFmt(it, st).tagText || textOn(fill), tg = el("g", { transform: `rotate(-90 ${cx} ${cy})` }, g);
       const dy = sub ? -ss * .55 : 0;
       el("text", { x: cx, y: cy + size * .36 + dy, "text-anchor": "middle", fill: ink, "font-size": size, "font-weight": 700, "font-family": F.font }, tg, it.name);
       if (sub) el("text", { x: cx, y: cy + size * .36 + dy + ss * 1.15, "text-anchor": "middle", fill: ink, "font-size": ss, "font-weight": 500, "font-family": F.font }, tg, sub);
@@ -1254,7 +1259,7 @@ function drawCurtainTags(svg, L, opts, F) {
     else if (f.tagStyle === "outline") el("rect", { ...box, fill: "#FFFFFF", "fill-opacity": .92, stroke: f.fillColour, "stroke-width": 1.1 }, grp);
     else el("rect", { ...box, fill: "transparent" }, grp);   // plain text: invisible grab area
     el("text", { x: t.x + (f.tagStyle === "text" ? 3 : 7), y: t.y + t.h / 2 + sz.font * .36, fill: f.textColour, "font-size": sz.font, "font-weight": 700, "font-family": F.font, "pointer-events": "none" }, grp, t.text);
-    if (selected) el("rect", { x: t.x1, y: top, width: t.x2 - t.x1, height: h, fill: "none", stroke: BRAND.orange, "stroke-width": 2, "pointer-events": "none" }, grp);
+    if (selected) { const [y1, y2] = curtainY(it, L); el("rect", { x: t.x1, y: y1, width: t.x2 - t.x1, height: y2 - y1, fill: "none", stroke: BRAND.orange, "stroke-width": 2, "pointer-events": "none" }, grp); }
     if (!opts.print) {   // full-height edge strips to drag the start and finish
       el("rect", { x: t.x1 - 3, y: top, width: 6, height: h, fill: "transparent", "data-id": it.id, "data-part": "l", style: "cursor:ew-resize" }, grp);
       el("rect", { x: t.x2 - 3, y: top, width: 6, height: h, fill: "transparent", "data-id": it.id, "data-part": "r", style: "cursor:ew-resize" }, grp);
@@ -2948,10 +2953,12 @@ function bindTagControls(root, set) {
 }
 
 /* the lanes a curtain, gate or zone covers: it.zone = [top lane id, bottom lane id], or none for the whole sheet */
-function zoneLanes(it) {
+function zoneLanes(it) {   // [top lane index, bottom lane index], -1 for the edge of the sheet; null for the whole sheet
   if (!Array.isArray(it.zone) || !it.zone.length) return null;
-  const idx = it.zone.map(id => P.lanes.findIndex(l => l.id === id)).filter(i => i >= 0);
-  return idx.length ? [Math.min(...idx), Math.max(...idx)] : null;
+  const z = it.zone.length === 1 ? [it.zone[0], it.zone[0]] : it.zone, at = id => id ? P.lanes.findIndex(l => l.id === id) : -1;
+  let a = at(z[0]), b = at(z[1]);
+  if (a >= 0 && b >= 0 && a > b) [a, b] = [b, a];
+  return a < 0 && b < 0 ? null : [a, b];
 }
 function coverControls(cur) {
   if (curtainKind(P, cur) === "band") return "";   // the phase band has its own row under the timeline
@@ -2965,11 +2972,9 @@ function bindCoverControls(cur, upd) {
   const t = $("cTop"), b = $("cBot"); if (!t) return;
   const set = () => upd(x => {
     let i0 = P.lanes.findIndex(l => l.id === t.value), i1 = P.lanes.findIndex(l => l.id === b.value);
-    if (i0 < 0 && i1 < 0) { delete x.zone; return; }
-    if (i0 < 0) i0 = 0; if (i1 < 0) i1 = P.lanes.length - 1;
-    if (i0 > i1) [i0, i1] = [i1, i0];
-    if (i0 === 0 && i1 === P.lanes.length - 1) { delete x.zone; return; }   // every lane: the whole sheet
-    x.zone = [P.lanes[i0].id, P.lanes[i1].id];
+    if (i0 < 0 && i1 < 0) { delete x.zone; return; }   // both edges: the whole sheet
+    if (i0 >= 0 && i1 >= 0 && i0 > i1) [i0, i1] = [i1, i0];
+    x.zone = [i0 >= 0 ? P.lanes[i0].id : "", i1 >= 0 ? P.lanes[i1].id : ""];   // "" = from the top / to the bottom of the sheet
   });
   t.onchange = set; b.onchange = set;
 }
