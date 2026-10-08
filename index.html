@@ -2940,6 +2940,32 @@ function bindTagControls(root, set) {
   const auto = root.querySelector("#tagAuto"); if (auto) auto.onclick = e => { e.preventDefault(); set("tagFill", ""); set("tagText", ""); };
 }
 
+/* the lanes a curtain, gate or zone covers: it.zone = [top lane id, bottom lane id], or none for the whole sheet */
+function zoneLanes(it) {
+  if (!Array.isArray(it.zone) || !it.zone.length) return null;
+  const idx = it.zone.map(id => P.lanes.findIndex(l => l.id === id)).filter(i => i >= 0);
+  return idx.length ? [Math.min(...idx), Math.max(...idx)] : null;
+}
+function coverControls(cur) {
+  if (curtainKind(P, cur) === "band") return "";   // the phase band has its own row under the timeline
+  const z = zoneLanes(cur), opt = (k, sel) => P.lanes.map((l, i) => `<option value="${l.id}" ${sel === i ? "selected" : ""}>${esc(l.name)}</option>`).join("");
+  return `<div class="row2">
+      <div class="f"><label for="cTop">Covers from</label><select id="cTop"><option value="">Top of the sheet</option>${opt("t", z ? z[0] : -1)}</select></div>
+      <div class="f"><label for="cBot">down to</label><select id="cBot"><option value="">Bottom of the sheet</option>${opt("b", z ? z[1] : -1)}</select></div>
+    </div>`;
+}
+function bindCoverControls(cur, upd) {
+  const t = $("cTop"), b = $("cBot"); if (!t) return;
+  const set = () => upd(x => {
+    let i0 = P.lanes.findIndex(l => l.id === t.value), i1 = P.lanes.findIndex(l => l.id === b.value);
+    if (i0 < 0 && i1 < 0) { delete x.zone; return; }
+    if (i0 < 0) i0 = 0; if (i1 < 0) i1 = P.lanes.length - 1;
+    if (i0 > i1) [i0, i1] = [i1, i0];
+    if (i0 === 0 && i1 === P.lanes.length - 1) { delete x.zone; return; }   // every lane: the whole sheet
+    x.zone = [P.lanes[i0].id, P.lanes[i1].id];
+  });
+  t.onchange = set; b.onchange = set;
+}
 /* inspector for one curtain */
 function renderCurtainSide(side, cur) {
   const { st, fill, stroke, opacity } = curtainColours(cur);
@@ -2959,11 +2985,12 @@ function renderCurtainSide(side, cur) {
       <div class="f"><label for="cFill">Shade colour</label><input id="cFill" type="color" value="${fill}"></div>
       <div class="f"><label for="cStroke">Tag &amp; edges</label><input id="cStroke" type="color" value="${stroke}"></div>
     </div>
+    ${coverControls(cur)}
     ${tagControls(tagFmt(cur, st))}
     <p class="note">${cur.fill || cur.stroke || cur.opacity != null || TAG_KEYS.some(k => cur[k] != null) ? `Custom look for this curtain · <a href="#" id="cReset">use the type's</a>` : `Uses the “${esc(st.notes)}” type's colours, shading and tag format.`}</p>
     <div class="f"><label for="cId">ShapeID</label><input id="cId" value="${esc(cur.id)}"></div>
     <div class="actions"><button class="btn" id="cDup">Duplicate</button><button class="btn danger" id="cDel">Delete</button></div>
-    <p class="note">Curtains run through every lane. Drag the tag to move one; drag its left or right edge to change the dates.</p>`;
+    <p class="note">${zoneLanes(cur) ? "This one covers only the lanes above." : "Curtains run through every lane unless you pick lanes above."} Drag the tag to move one; drag its left or right edge to change the dates.</p>`;
   const upd = f => commit(p => f(p.items.find(i => i.id === cur.id)), true);
   $("cName").onchange = e => upd(x => x.name = e.target.value);
   $("cStart").onchange = e => { if (!e.target.value) return; upd(x => { const d = toDays(e.target.value) - toDays(x.start); x.start = e.target.value; if (toDays(x.end) < toDays(x.start)) x.end = addDays(x.end, d); }); };
@@ -2981,6 +3008,7 @@ function renderCurtainSide(side, cur) {
   $("cStroke").onchange = e => upd(x => x.stroke = e.target.value.toUpperCase());
   if ($("cReset")) $("cReset").onclick = e => { e.preventDefault(); upd(x => { x.fill = ""; x.stroke = ""; delete x.opacity; TAG_KEYS.forEach(k => delete x[k]); }); };
   bindTagControls(side, (k, v) => upd(x => { x[k] = v; }));
+  bindCoverControls(cur, upd);
   $("cId").onchange = e => { const v = e.target.value.trim(); if (!v || P.items.some(i => i.id === v)) { toast(v ? `${v} is already used. ShapeIDs must be unique.` : "ShapeID can't be empty."); renderSide(); return; } upd(x => x.id = v); sel.id = v; renderSide(); };
   $("cDup").onclick = () => { const c = { ...clone(cur), id: nextId(P, cur.style, cur.id), start: addDays(cur.end, 1), end: addDays(cur.end, curtainDays(cur)) }; commit(p => p.items.push(c)); sel = { type: "item", id: c.id }; render(); renderSide(); };
   $("cDel").onclick = () => { commit(p => p.items = p.items.filter(i => i.id !== cur.id)); sel = null; renderSide(); };
@@ -4109,7 +4137,7 @@ function p6BuildSummary(M, rec) {
     take(L, 1);
   }
   const gates = keyMs.filter(t => role(t) === "gate");
-  gates.forEach(t => rows.push({ id: "GATE " + t.code, name: p6GateName(t.name), style: "GATE", lane: "", start: t.start, end: t.start, status: "Active", row: 0, y: NaN, fill: "", stroke: "" }));
+  const gateRows = gates.map(t => { const r = { id: "GATE " + t.code, name: p6GateName(t.name), style: "GATE", lane: "", start: t.start, end: t.start, status: "Active", row: 0, y: NaN, fill: "", stroke: "", task: t }; rows.push(r); return r; });
   const band = rec["~band"] || {};
   const closeT = keyMs.find(t => t.code === band.from) || (band.from === undefined ? gates.find(t => /closure|closed|shutdown/i.test(t.name)) : null);
   const openT = keyMs.find(t => t.code === band.to) || (band.to === undefined ? gates.find(t => /ready|re-?open|open/i.test(t.name) && closeT && t.start > closeT.start) : null);
@@ -4152,7 +4180,7 @@ function p6BuildSummary(M, rec) {
       const tiles = rec["~tiles"] !== false && g.acts.some(t => !tilesDone.has(t.code) && p6PossType(t));
       const half = Math.max(0, (textW(name, 9, 700) + 24) / dayPx() - (toDays(e) - toDays(s))) / 2;
       const top = place(lane, tiles ? 3 : 2, toDays(s) - half - 14, toDays(e) + half + 14);
-      rows.push({ id, name, style: p6UStyle(w, design), lane: lane.name, start: s, end: e, status: "Active", row: top, y: NaN, fill: "", stroke: "", p6: { crit: crit(g.acts) } });
+      rows.push({ id, name, style: p6UStyle(w, design), lane: lane.name, start: s, end: e, status: "Active", row: top, y: NaN, fill: "", stroke: "", p6: { crit: crit(g.acts) }, acts: g.acts });
       stages.forEach(st => rows.push({ id: `${id} · ${st.key}`, name: st.name, style: "BAR", lane: lane.name, start: st.s, end: st.e, status: "Active", row: top + 1, y: NaN, fill: "", stroke: "", parent: id }));
       if (rec["~tiles"] !== false) g.acts.filter(t => !tilesDone.has(t.code) && p6PossType(t)).forEach(t => {
         tilesDone.add(t.code);
@@ -4171,13 +4199,34 @@ function p6BuildSummary(M, rec) {
     }
     if (m === "bar") {
       lane = lane || addLane(w.path.split(".")[0], (M.top.kids.find(k => k.path === w.path.split(".")[0]) || w).name);
-      rows.push({ id: "WBS " + w.path, name: p6Short(w.name), style: "BAR", lane: lane.name, start: r.s, end: r.e, status: "Active", row: take(lane, 1), y: NaN, fill: "", stroke: "", p6: { crit: crit(r.inc) } });
+      rows.push({ id: "WBS " + w.path, name: p6Short(w.name), style: "BAR", lane: lane.name, start: r.s, end: r.e, status: "Active", row: take(lane, 1), y: NaN, fill: "", stroke: "", p6: { crit: crit(r.inc) }, acts: r.inc });
       return;
     }
     if (m === "umbrella") return umbrella(w, lane);
     w.kids.forEach(k => visit(k, lane));
   };
   M.top.kids.forEach(w => visit(w, null));
+  // a gate covers the lanes of the work its logic ties it to (through other milestones), when that's only part of the sheet
+  const laneOfTask = new Map();
+  rows.forEach(r => { if (r.lane && r.acts) r.acts.forEach(t => laneOfTask.has(t.code) || laneOfTask.set(t.code, r.lane)); delete r.acts; });
+  const workLanes = new Set(rows.filter(r => r.lane && !/^(SCAS Schedule|Key Dates)$/.test(r.lane)).map(r => r.lane));
+  for (const g of gateRows) {
+    const t = g.task; delete g.task;
+    if ((rec["~gateLanes"] || {})[t.code] === "all") continue;
+    const hit = new Set(), seen = new Set([t]);
+    let front = [...t.preds, ...t.succs];
+    for (let step = 0; step < 4 && front.length; step++) {
+      const next = [];
+      for (const x of front) {
+        if (seen.has(x)) continue; seen.add(x);
+        const ln = laneOfTask.get(x.code);
+        if (ln && workLanes.has(ln)) hit.add(ln);
+        else if (x.ms) next.push(...x.preds, ...x.succs);   // milestones pass the link on
+      }
+      front = next;
+    }
+    if (hit.size && hit.size < workLanes.size - 1) g.zoneLanes = [...hit];
+  }
   return { rows, lanes: lanes.filter(l => cursor.get(l) > 0 || rows.some(r => r.lane === l.name)), keyMs, role };
 }
 /* A whole programme from an XER and the choices made (used by Build and by the live preview). */
@@ -4203,6 +4252,10 @@ function p6MakeProject(M, rec, fname) {
     if (r.p6) { if (r.p6.crit) i.p6crit = true; if (r.p6.tf != null) i.p6tf = r.p6.tf; }
     if (r.x) Object.assign(i, r.x);
     if (r.labelMode && r.labelMode !== "auto") i.labelMode = r.labelMode;
+    if (r.zoneLanes) {   // lane names → the top and bottom lane it covers
+      const idx = r.zoneLanes.map(n => p.lanes.findIndex(l => l.name === n)).filter(k => k >= 0);
+      if (idx.length) i.zone = [p.lanes[Math.min(...idx)].id, p.lanes[Math.max(...idx)].id];
+    }
   });
   if (summary) syncContainers(p, { noPush: true });
   return { p, rows, lanes };

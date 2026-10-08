@@ -278,6 +278,21 @@ const TESTS = {
     T.ok(document.querySelector("#chart") && /Portion B/.test(document.querySelector("#chart").textContent), "and so does Build");
     T.eq(titleLines("Construction Main Works Rail Corridor", 0).length, 3, "a long lane name wraps to three lines");
   },
+  "A gate or curtain can cover only some lanes": () => {
+    const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
+    const ls = ["North", "Middle", "South"].map(n => newLane(p, n));
+    ls.forEach((l, k) => p.items.push({ id: "B" + k, name: "B" + k, style: "BAR", lane: l.id, start: "2027-02-01", end: "2027-03-01", status: "Active", row: 0, fill: "", stroke: "" }));
+    p.items.push({ id: "G", name: "Cutover", style: "GATE", lane: "", start: "2027-04-01", end: "2027-04-01", status: "Active", row: 0, fill: "", stroke: "" });
+    loadDoc(p, null);
+    sel = { type: "item", id: "G" }; render(); renderSide();
+    const set = (id, v) => { const s = document.getElementById(id); s.value = v; s.dispatchEvent(new Event("change")); };
+    set("cTop", ls[2].id); set("cBot", ls[1].id);
+    T.eq(T.item("G").zone, [ls[1].id, ls[2].id], "picked either way round, stored top to bottom");
+    const lane = id => LAY.lanes.find(x => x.l.id === id), [y1, y2] = curtainY(T.item("G"), LAY);
+    T.eq([y1, y2], [lane(ls[1].id).y, lane(ls[2].id).y + lane(ls[2].id).h], "drawn from the top of Middle to the bottom of South");
+    set("cTop", ""); set("cBot", "");
+    T.eq(T.item("G").zone, undefined, "no lanes picked: the whole sheet again");
+  },
   "Help opens with ? and lists the shortcuts": () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "?", bubbles: true }));
     const m = document.querySelector(".modal");
