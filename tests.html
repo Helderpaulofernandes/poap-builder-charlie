@@ -278,6 +278,16 @@ const TESTS = {
     T.ok(document.querySelector("#chart") && /Portion B/.test(document.querySelector("#chart").textContent), "and so does Build");
     T.eq(titleLines("Construction Main Works Rail Corridor", 0).length, 3, "a long lane name wraps to three lines");
   },
+  "P6 summary style: a package as a summary box with its parts inside": () => {
+    const M = p6Model(parseXer(T.xer())), rec = p6SuggestSummary(M);
+    rec["C.A"] = "group"; rec["C.A.1"] = "bar"; rec["C.A.2"] = "bar";
+    const { rows } = p6BuildSummary(M, rec), r = id => rows.find(x => x.id === id);
+    T.eq([r("WBS C.A").style, r("WBS C.A").name], ["SUMMARY_BOX", "Portion A - North / Metro"]);
+    T.eq(rows.filter(x => x.parent === "WBS C.A").map(x => [x.name, x.row - r("WBS C.A").row]), [["Segment 1", 1], ["Segment 2", 1]], "parts that follow one another share the row under the box");
+    const { p } = p6MakeProject(M, rec, "T-100 OPTION A.xer"); loadDoc(p, null);
+    T.eq(containerChildren(P, T.item("WBS C.A")).map(i => i.id).sort(), ["WBS C.A.1", "WBS C.A.2"], "a real summary on the sheet");
+    T.eq(p6Short("NAS-ARC-ARWS01 Wayfinding & Signage"), "Wayfinding & Signage", "package codes left off the names");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));

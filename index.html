@@ -3975,6 +3975,7 @@ function p6Build(M, rec) {
    their own lane at the top, and the key dates become full-height gates and a phase band. */
 const p6Short = s => {   // WBS names typed in capitals read as shouting: sentence case, keeping short acronyms
   s = String(s || "").replace(/\s+/g, " ").trim();
+  s = s.replace(/^(?=[A-Z0-9_.-]*\d)[A-Z0-9]+(?:[-_.][A-Z0-9]+)+\s+(?=\S)/, "");   // a package code in front ("NAS-ARC-ARAR01 Wayfinding") says nothing on the sheet
   if (/[a-z]/.test(s) || !/[A-Z]{4}/.test(s)) return s;
   const t = s.toLowerCase().replace(/\b[a-z]{2,3}\b/g, (w, i) => (s.substr(i, w.length).match(/^[A-Z]{2,3}$/) && !/^(ALL|AND|THE|FOR|OF|TO|IN|ON|BY)$/.test(s.substr(i, w.length)) ? w.toUpperCase() : w));
   return t.charAt(0).toUpperCase() + t.slice(1);
@@ -4208,6 +4209,30 @@ function p6BuildSummary(M, rec) {
       return;
     }
     if (m === "umbrella") return umbrella(w, lane);
+    if (m === "group") {   // the package as a summary box, its parts as bars inside it (a part set to "look inside" gives its own parts)
+      lane = lane || addLane(w.path.split(".")[0], (M.top.kids.find(k => k.path === w.path.split(".")[0]) || w).name);
+      const col = (summaryStyleDefaults().find(x => x.name === p6UStyle(w, p6IsDesign(w))) || {}).fill || BRAND.navy;
+      const parts = [], collect = k => {
+        const mk = mode(k), rk = p6Roll(M, k);
+        if (!rk.inc.length || ["hide", "possess", "ms"].includes(mk)) return;
+        if (mk === "zone") return visit(k, lane);
+        if (mk === "split") return k.kids.forEach(collect);
+        if (rk.s) parts.push({ k, rk });
+      };
+      w.kids.forEach(collect);
+      const id = "WBS " + w.path, box = { id, name: p6Short(w.name), style: "SUMMARY_BOX", lane: lane.name, start: r.s, end: r.e, status: "Active", row: 0, y: NaN, fill: "", stroke: shade(col, .25), p6: { crit: crit(r.inc) }, acts: r.inc };
+      rows.push(box);
+      // parts that follow one another share a row, leaving room for a name beside the bar
+      const ends = [];
+      parts.sort((a, b) => a.rk.s < b.rk.s ? -1 : 1).forEach(({ k, rk }) => {
+        const name = p6Short(k.name), s0 = toDays(rk.s), e0 = toDays(rk.e) + (textW(name, 9, 500) + 16) / dayPx();
+        let i = ends.findIndex(x => x < s0); if (i < 0) { i = ends.length; ends.push(0); } ends[i] = e0;
+        rows.push({ id: "WBS " + k.path, name, style: "BAR", lane: lane.name, start: rk.s, end: rk.e, status: "Active", row: i + 1, y: NaN, fill: tint(col, .5), stroke: "", parent: id, p6: { crit: crit(rk.inc) }, acts: rk.inc });
+      });
+      const top = take(lane, 1 + Math.max(1, ends.length));
+      rows.filter(x => x === box || x.parent === id).forEach(x => x.row += top);
+      return;
+    }
     w.kids.forEach(k => visit(k, lane));
   };
   M.top.kids.forEach(w => visit(w, null));
@@ -4315,7 +4340,7 @@ function p6ApplyChoices(M, rec, set) {
 }
 /* the scenario named in the file: "P26-8287 RESOURCE HEAVY.xer" → "Resource Heavy" */
 const p6Scenario = fname => fname.replace(/\.xer$/i, "").replace(/^[A-Z]{0,4}-?\d[\w-]*\s+/i, "").trim().toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
-const P6_MODES_SUMMARY = [["lane", "Lane (parts below)"], ["umbrella", "Umbrella row"], ["split", "Look inside"], ["possess", "Possession lane"], ["ms", "Key dates"], ["zone", "Zone (large label)"], ["bar", "One bar"], ["hide", "Leave out"]];
+const P6_MODES_SUMMARY = [["lane", "Lane (parts below)"], ["umbrella", "Umbrella row"], ["group", "Summary box (parts inside)"], ["split", "Look inside"], ["possess", "Possession lane"], ["ms", "Key dates"], ["zone", "Zone (large label)"], ["bar", "One bar"], ["hide", "Leave out"]];
 function openP6Builder(M, rec, fname, mode, from = null) {
   const update = mode === "update";
   const otherScenario = update && p6Scenario(fname) && p6Scenario(fname).toLowerCase() !== String(P.meta.title || "").toLowerCase();
@@ -4369,7 +4394,7 @@ function openP6Builder(M, rec, fname, mode, from = null) {
   m.querySelector(".dlg").classList.add("wide", "p6dlg");
   const tree = m.querySelector("#p6Tree"), sum = m.querySelector("#p6Sum"), prev = m.querySelector("#p6Prev");
   const open = new Set(M.top.kids.map(w => w.path));   // expanded nodes
-  const showKids = w => ["lane", "split"].includes(rec[w.path] || "hide");
+  const showKids = w => ["lane", "split", "group"].includes(rec[w.path] || "hide");
   let prevTimer = 0;
   const drawPreview = () => {
     clearTimeout(prevTimer);
@@ -4409,7 +4434,7 @@ function openP6Builder(M, rec, fname, mode, from = null) {
     const built = summary() ? p6BuildSummary(M, rec) : p6Build(M, rec), items = built.rows, lanes = built.lanes;
     const count = (its, test, w) => { const n = its.filter(test).length; return n ? `${n} ${w}${n > 1 ? "s" : ""}` : ""; };
     const per = lanes.map(l => { const its = items.filter(i => i.lane === l.name);
-      return `<li><b>${esc(l.name)}</b><span class="note">${[count(its, i => /^U_/.test(i.style), "umbrella"), count(its, i => i.style === "BAR" && !i.parent, "bar"), count(its, i => i.style === "BAR" && i.parent, "stage"), count(its, i => /^POS_/.test(i.style), "possession"), count(its, i => /^ML_/.test(i.style), "milestone")].filter(Boolean).join(", ")}</span></li>`; }).join("");
+      return `<li><b>${esc(l.name)}</b><span class="note">${[count(its, i => /^U_/.test(i.style), "umbrella"), count(its, i => i.style === "SUMMARY_BOX", "summary box"), count(its, i => i.style === "BAR" && !i.parent, "bar"), count(its, i => i.style === "BAR" && i.parent, "stage"), count(its, i => /^POS_/.test(i.style), "possession"), count(its, i => /^ML_/.test(i.style), "milestone")].filter(Boolean).join(", ")}</span></li>`; }).join("");
     const left = M.includeAll ? 0 : M.out.size;
     let dates = "";
     if (summary() && built.keyMs.length) {
@@ -4440,7 +4465,10 @@ function openP6Builder(M, rec, fname, mode, from = null) {
   };
   tree.addEventListener("change", e => {
     const s = e.target.closest("[data-mode]"), st = e.target.closest("[data-stages]"), sp = e.target.closest("[data-split]");
-    if (s) { rec[s.dataset.mode] = s.value; if (["lane", "split"].includes(s.value)) open.add(s.dataset.mode); }
+    if (s) {
+      rec[s.dataset.mode] = s.value; if (["lane", "split", "group"].includes(s.value)) open.add(s.dataset.mode);
+      if (s.value === "group") { const w = M.nodes.find(x => x.path === s.dataset.mode); (w ? w.kids : []).forEach(k => { if (["umbrella", "group", "lane"].includes(rec[k.path]) || !rec[k.path]) rec[k.path] = p6Roll(M, k).work.length ? "bar" : "hide"; }); }
+    }
     if (st) rec["~stages"] = { ...(rec["~stages"] || {}), [st.dataset.stages]: st.value };
     if (sp) rec["~split"] = { ...(rec["~split"] || {}), [sp.dataset.split]: sp.checked };
     paint();
