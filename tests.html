@@ -293,6 +293,24 @@ const TESTS = {
     set("cTop", ""); set("cBot", "");
     T.eq(T.item("G").zone, undefined, "no lanes picked: the whole sheet again");
   },
+  "P6 importer: saved choices start the next scenario": async () => {
+    localStorage.removeItem(P6_CHOICES_KEY);
+    await importP6(new File([T.xer()], "T-100 OPTION A.xer"), "new");
+    const m = () => document.querySelector(".modal"), pick = (sel, v) => { const s = m().querySelector(sel); s.value = v; s.dispatchEvent(new Event("change", { bubbles: true })); };
+    pick('[data-mode="C.B"]', "hide");
+    m().querySelector("#p6SetSave").click();
+    m().querySelector("#p6SetName").value = "T-100 station";
+    m().querySelector("#p6SetOk").click();
+    T.eq(p6ChoiceSets().map(x => [x.name, x.code, x.recipe["C.B"]]), [["T-100 station", "T-100", "hide"]], "kept in this browser");
+    T.clean();
+    // the next scenario of the same job opens with those choices, not the suggestion
+    await importP6(new File([T.xer(14)], "T-100 OPTION B.xer"), "new");
+    T.ok(/saved choices “T-100 station”/.test(m().querySelector("#p6From").textContent), "says where it started from");
+    T.eq(m().querySelector('[data-mode="C.B"]').value, "hide");
+    m().querySelector("[data-act=go]").click();
+    T.ok(!P.items.some(i => i.id === "WBS C.B"), "and builds with them");
+    localStorage.removeItem(P6_CHOICES_KEY);
+  },
   "Help opens with ? and lists the shortcuts": () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "?", bubbles: true }));
     const m = document.querySelector(".modal");

@@ -74,6 +74,9 @@ button, input, select { font: inherit; color: inherit; }
 .dlg.p6dlg { width: min(1360px, 100%); max-height: 94vh; }
 .p6head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .p6style { flex: none; }
+.p6sets { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.p6sets select { max-width: 260px; }
+.p6sets input { width: 190px; }
 .p6style button { padding: 6px 12px; }
 .p6body { display: grid; gap: 10px; }
 .p6prev { border: 1px solid var(--line); border-radius: 4px; background: #FFFFFF; max-height: 34vh; overflow: auto; cursor: zoom-in; }
@@ -4282,17 +4285,41 @@ async function importP6(file, mode) {
   M.includeAll = !!(saved && P.p6.includeAll);
   const style = saved ? saved["~style"] || "detailed" : "summary";   // Charlie starts new imports in the summary style
   const rec = style === "summary" ? { ...p6SuggestSummary(M), ...(saved || {}) } : { ...p6Suggest(M), ...(saved || {}), "~style": "detailed" };
-  openP6Builder(M, rec, file.name, mode);
+  let from = null;
+  if (!saved) {   // another scenario of a job you've done before: start from the choices you saved for it
+    const set = p6ChoiceSets().filter(x => M.code && x.code === M.code).sort((a, b) => a.saved < b.saved ? 1 : -1)[0];
+    if (set) from = { name: set.name, ...p6ApplyChoices(M, rec, set) };
+  }
+  openP6Builder(M, rec, file.name, mode, from);
+}
+/* saved importer choices: named sets kept in this browser, and as files to share ("Station summary", per project code) */
+const P6_CHOICES_KEY = "poap.p6choices";
+function p6ChoiceSets() { try { const v = JSON.parse(localStorage.getItem(P6_CHOICES_KEY)); return Array.isArray(v) ? v : []; } catch (e) { return []; } }
+function saveP6ChoiceSets(list) {
+  try { localStorage.setItem(P6_CHOICES_KEY, JSON.stringify(list)); return true; }
+  catch (e) { toast("Couldn't keep the choices in this browser (storage full?). Save them to a file instead.", 6000); return false; }
+}
+// the choices worth keeping: the ~options and the WBS parts this file has
+const p6Recipe = (M, rec) => Object.fromEntries(Object.entries(rec).filter(([k]) => k.startsWith("~") || M.nodes.some(w => w.path === k)));
+// start from a saved set: the suggestion first, so WBS parts the set doesn't know still get one
+function p6ApplyChoices(M, rec, set) {
+  const r = set.recipe || {}, summary = (r["~style"] || "summary") === "summary";
+  const base = summary ? p6SuggestSummary(M) : { ...p6Suggest(M), "~style": "detailed" };
+  const known = Object.entries(r).filter(([k]) => k.startsWith("~") || M.nodes.some(w => w.path === k));
+  Object.keys(rec).forEach(k => delete rec[k]); Object.assign(rec, base, Object.fromEntries(known));
+  if (set.includeAll != null) { M.includeAll = !!set.includeAll; M.roll.clear(); }
+  const used = known.filter(([k]) => !k.startsWith("~")).length;
+  return { used, fresh: Object.keys(base).filter(k => !k.startsWith("~") && !(k in r)).length, missing: Object.keys(r).filter(k => !k.startsWith("~")).length - used };
 }
 /* the scenario named in the file: "P26-8287 RESOURCE HEAVY.xer" → "Resource Heavy" */
 const p6Scenario = fname => fname.replace(/\.xer$/i, "").replace(/^[A-Z]{0,4}-?\d[\w-]*\s+/i, "").trim().toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
 const P6_MODES_SUMMARY = [["lane", "Lane (parts below)"], ["umbrella", "Umbrella row"], ["split", "Look inside"], ["possess", "Possession lane"], ["ms", "Key dates"], ["zone", "Zone (large label)"], ["bar", "One bar"], ["hide", "Leave out"]];
-function openP6Builder(M, rec, fname, mode) {
+function openP6Builder(M, rec, fname, mode, from = null) {
   const update = mode === "update";
   const otherScenario = update && p6Scenario(fname) && p6Scenario(fname).toLowerCase() !== String(P.meta.title || "").toLowerCase();
   const summary = () => rec["~style"] === "summary";
   const m = showModal(`<header class="p6head"><div><h3>${update ? "Update from" : "Summary from"} P6: ${esc(fname)}</h3>
-      <p>${esc(M.title)}${M.code ? ` (${esc(M.code)})` : ""} · data date ${M.dataDate ? fmt(M.dataDate) : "not set"} · ${M.tasks.length} activities. ${update ? "These are the choices used last time; new WBS parts have a suggestion." : "This is a suggestion to start from: change anything and the preview follows."}</p></div>
+      <p>${esc(M.title)}${M.code ? ` (${esc(M.code)})` : ""} · data date ${M.dataDate ? fmt(M.dataDate) : "not set"} · ${M.tasks.length} activities. <span id="p6From">${update ? "These are the choices used last time; new WBS parts have a suggestion." : from ? p6FromNote(from) : "This is a suggestion to start from: change anything and the preview follows."}</span></p></div>
       <div class="seg p6style" role="group" aria-label="Style"><button type="button" data-style="summary">Summary</button><button type="button" data-style="detailed">Detailed (WBS bars)</button></div></header>
     <div class="body p6body">
       <div class="p6prev" id="p6Prev" title="Click to make the preview larger or smaller"><p class="note">Drawing the preview…</p></div>
@@ -4300,12 +4327,13 @@ function openP6Builder(M, rec, fname, mode) {
     </div>
     <footer>
       <button class="btn" id="p6Reset" title="Back to the suggestion from the WBS">Suggest again</button>
+      <span class="p6sets" id="p6Sets"></span>
       ${update ? `<label class="check" title="Show this programme's current dates as a narrow grey baseline under the updated bars"><input type="checkbox" id="p6Keep" ${otherScenario ? "checked" : ""}> Show the current dates as the baseline</label>
         <label class="check" title="Keep this programme as it is and save the update as its own file"><input type="checkbox" id="p6Sep" ${otherScenario ? "checked" : ""}> Make it a separate programme${otherScenario ? ` (“${esc(p6Scenario(fname))}”)` : ""}</label>` : ""}
       <span class="spacer" style="flex:1"></span><button class="btn" data-act="close">Cancel</button>
       <button class="btn primary" data-act="go">${update ? "Review the changes" : "Build the summary"}</button></footer>`, {
     go: () => {
-      const recipe = Object.fromEntries(Object.entries(rec).filter(([k]) => k.startsWith("~") || M.nodes.some(w => w.path === k)));
+      const recipe = p6Recipe(M, rec);
       const p6 = { recipe, code: M.code, title: M.title, source: fname, imported: todayISO(), includeAll: !!M.includeAll };
       const anyProgress = M.tasks.some(t => t.actual);
       const dataDate = anyProgress && M.dataDate ? addDays(M.dataDate, -1) : "";   // P6's data date is the start of the day; ours is the end
@@ -4422,8 +4450,70 @@ function openP6Builder(M, rec, fname, mode) {
     Object.assign(rec, b.dataset.style === "summary" ? p6SuggestSummary(M) : { ...p6Suggest(M), "~style": "detailed" });
     paint();
   });
-  m.querySelector("#p6Reset").onclick = () => { const style = rec["~style"]; Object.keys(rec).forEach(k => delete rec[k]); Object.assign(rec, style === "summary" ? p6SuggestSummary(M) : { ...p6Suggest(M), "~style": "detailed" }); paint(); };
+  m.querySelector("#p6Reset").onclick = () => { const style = rec["~style"]; Object.keys(rec).forEach(k => delete rec[k]); Object.assign(rec, style === "summary" ? p6SuggestSummary(M) : { ...p6Suggest(M), "~style": "detailed" }); m.querySelector("#p6From").textContent = "Back to the suggestion from the WBS."; from = null; paintSets(); paint(); };
+  // saved choices: start from a set, save these under a name, or share them as a file
+  const setsBox = m.querySelector("#p6Sets");
+  const use = (set, label) => { const r = p6ApplyChoices(M, rec, set); from = { name: label || set.name, ...r }; m.querySelector("#p6From").innerHTML = p6FromNote(from); paintSets(); paint(); };
+  function paintSets(saving) {
+    const sets = p6ChoiceSets().sort((a, b) => (b.code === M.code) - (a.code === M.code) || (a.saved < b.saved ? 1 : -1));
+    if (saving) {
+      const def = from && sets.some(x => x.name === from.name) ? from.name : `${M.code || "P6"} ${rec["~style"] === "summary" ? "summary" : "detailed"}`;
+      setsBox.innerHTML = `<input id="p6SetName" value="${esc(def)}" aria-label="Name for these choices"><button class="btn primary" id="p6SetOk">Save</button><button class="btn" id="p6SetNo">Cancel</button>`;
+      const name = setsBox.querySelector("#p6SetName"); name.focus(); name.select();
+      const ok = () => {
+        const n = name.value.trim(); if (!n) return;
+        const list = p6ChoiceSets().filter(x => x.name !== n);
+        list.push({ name: n, code: M.code, title: M.title, saved: new Date().toISOString(), recipe: p6Recipe(M, rec), includeAll: !!M.includeAll });
+        if (saveP6ChoiceSets(list)) { toast(`Choices saved as “${n}”. They'll be offered for the next ${M.code || "P6"} file.`); from = { name: n, used: 0, fresh: 0, missing: 0, justSaved: true }; }
+        paintSets();
+      };
+      setsBox.querySelector("#p6SetOk").onclick = ok; name.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); ok(); } if (e.key === "Escape") { e.stopPropagation(); paintSets(); } };
+      setsBox.querySelector("#p6SetNo").onclick = () => paintSets();
+      return;
+    }
+    const cur = from && sets.find(x => x.name === from.name);
+    setsBox.innerHTML = `<select id="p6SetPick" aria-label="Start from saved choices" title="Start from choices saved earlier (other scenarios of the same job have the same WBS)">
+        <option value="">${sets.length ? "Saved choices…" : "No saved choices yet"}</option>
+        ${sets.map((x, i) => `<option value="${i}" ${cur === x ? "selected" : ""}>${esc(x.name)}${x.code && x.code !== M.code ? ` (${esc(x.code)})` : ""}</option>`).join("")}
+        <option value="~file">From a file…</option></select>
+      <button class="btn" id="p6SetSave" title="Keep these choices to start the next scenario from">Save choices</button>
+      <button class="btn" id="p6SetExport" title="Save these choices as a file to share with the team">To file</button>
+      ${cur ? `<button class="btn" id="p6SetDel" title="Remove “${esc(cur.name)}” from this browser">Forget</button>` : ""}`;
+    setsBox.querySelector("#p6SetPick").onchange = e => {
+      const v = e.target.value; if (v === "") return;
+      if (v === "~file") { pickChoicesFile(); paintSets(); return; }
+      use(sets[+v]);
+    };
+    setsBox.querySelector("#p6SetSave").onclick = () => paintSets(true);
+    setsBox.querySelector("#p6SetExport").onclick = () => {
+      const name = (from && from.name) || `${M.code || "P6"} ${rec["~style"] === "summary" ? "summary" : "detailed"}`;
+      const body = { kind: "poap-p6-choices", version: 1, name, code: M.code, title: M.title, saved: new Date().toISOString(), recipe: p6Recipe(M, rec), includeAll: !!M.includeAll };
+      download(new Blob([JSON.stringify(body, null, 1)], { type: "application/json" }), `${(M.code || "P6").replace(/[^\w.-]+/g, "_")} choices.json`);
+    };
+    const del = setsBox.querySelector("#p6SetDel");
+    if (del) del.onclick = () => { saveP6ChoiceSets(p6ChoiceSets().filter(x => x.name !== cur.name)); toast(`“${cur.name}” forgotten.`); from = null; paintSets(); };
+  }
+  // a choices file, or a programme built from P6 (its choices come with it)
+  function pickChoicesFile() {
+    const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".json";
+    inp.onchange = async () => {
+      const f = inp.files[0]; if (!f) return;
+      try {
+        const j = JSON.parse(await f.text());
+        const set = j && j.kind === "poap-p6-choices" ? j : j && j.p6 && j.p6.recipe ? { name: f.name.replace(/\.(poap\.)?json$/i, ""), code: j.p6.code, recipe: j.p6.recipe, includeAll: j.p6.includeAll } : null;
+        if (!set) return toast(`${f.name} has no importer choices in it.`, 5000);
+        if (set.code && M.code && set.code !== M.code) toast(`Note: these choices were made for ${set.code}; this file is ${M.code}.`, 6000);
+        use(set, set.name);
+      } catch (err) { toast("Couldn't read " + f.name + ": " + err.message, 6000); }
+    };
+    inp.click();
+  }
+  paintSets();
   paint();
+}
+function p6FromNote(f) {
+  if (f.justSaved) return `Choices saved as “${esc(f.name)}”.`;
+  return `Started from your saved choices “${esc(f.name)}”: ${f.used} WBS parts as before${f.fresh ? `, ${f.fresh} new part${f.fresh > 1 ? "s" : ""} with a suggestion` : ""}${f.missing ? ` (${f.missing} no longer in this file)` : ""}. Change anything and the preview follows.`;
 }
 $("fXer").onchange = async e => {
   const f = e.target.files[0], mode = e.target.dataset.mode || "new"; e.target.value = ""; if (!f) return;
