@@ -1,15 +1,14 @@
 // Which version this is, and what the start screen says about the other one.
-// The only file that differs between the branches: main = "stable", team-beta = "beta".
+// The only file that differs between the branches: main = "stable", team-beta = "beta", charlie = "charlie" (this one).
 window.POAP_CHANNEL = {
-  channel: "stable",
+  channel: "charlie",
   stableUrl: "https://helderpaulofernandes.github.io/poap-builder/",
-  betaUrl: "https://helderpaulofernandes.github.io/poap-builder-beta/",
-  title: "Team working",
+  betaUrl: "https://helderpaulofernandes.github.io/poap-builder-charlie/",
+  title: "Summary style",
   notes: [
-    "Sign in and work on the same programme as your team, live: changes appear as they're made.",
-    "Saved online, with every change kept, so you can see who changed an activity and put an older version back.",
-    "See who else is in the programme and what they're working on; an activity someone is editing is held for them.",
-    "Keeps working offline and catches up when you're back online.",
-    "A guided tour for people new to PoaP Builder.",
+    "A summary that tells the story of the job, not a copy of the P6 Gantt: each area is one bold umbrella bar with its stages chained underneath.",
+    "Possessions first: a SCAS lane at the top, and possession works shown as coloured tiles on each row with a caption.",
+    "Key dates as full-height gate lines, a phase band (e.g. Station open / closed / open), and zones with large labels for T&C, assurance, contingency and completion.",
+    "The P6 importer becomes a summary designer with a live preview of the sheet, and remembers your choices for the next XER.",
   ],
 };
