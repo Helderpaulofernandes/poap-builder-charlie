@@ -6,7 +6,7 @@
 <title>PoaP Builder</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Roboto+Condensed:wght@500;700&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://unpkg.com/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
@@ -70,6 +70,22 @@ button, input, select { font: inherit; color: inherit; }
 .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 6px; }
 /* P6 summary builder */
 .dlg.wide { width: min(1120px, 100%); }
+/* summary designer (Charlie): live preview on top, WBS choices and key dates below */
+.dlg.p6dlg { width: min(1360px, 100%); max-height: 94vh; }
+.p6head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.p6style { flex: none; }
+.p6style button { padding: 6px 12px; }
+.p6body { display: grid; gap: 10px; }
+.p6prev { border: 1px solid var(--line); border-radius: 4px; background: #FFFFFF; max-height: 34vh; overflow: auto; cursor: zoom-in; }
+.p6prev.big { max-height: 70vh; cursor: zoom-out; }
+.p6prev .note { padding: 12px; }
+.p6dlg .p6tree, .p6dlg .p6sum { max-height: 40vh; }
+.p6opts { display: inline-flex; gap: 8px; align-items: center; margin-left: 8px; font-size: 11.5px; }
+.p6opts select { padding: 1px 3px; font-size: 11px; border: 1px solid var(--line); border-radius: 3px; background: var(--bg); }
+.p6dates { display: grid; gap: 3px; max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 4px; padding: 6px; }
+.p6dates label { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 6px; align-items: center; font-size: 11.5px; }
+.p6dates label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.p6dates select { font-size: 11px; padding: 1px 3px; border: 1px solid var(--line); border-radius: 3px; background: var(--bg); }
 .p6b { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 16px; min-height: 0; }
 .p6tree { overflow: auto; max-height: 62vh; border: 1px solid var(--line); border-radius: 4px; }
 .p6row { display: grid; grid-template-columns: 22px minmax(0, 1fr) 150px 150px; gap: 6px; align-items: center; padding: 4px 8px 4px calc(6px + var(--d) * 18px); border-bottom: 1px solid var(--line); font-size: 12.5px; }
@@ -437,7 +453,10 @@ function switchBrand(b) {
 const $ = id => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
 const measureCtx = document.createElement("canvas").getContext("2d");
-function textW(t, size, weight) { measureCtx.font = `${weight||400} ${size}px Montserrat, Arial, sans-serif`; return measureCtx.measureText(t).width; }
+/* the sheet's typeface: Montserrat, or a condensed bold face for dense summary sheets (Page › Font) */
+const FACES = { montserrat: "Montserrat, Arial, sans-serif", condensed: "'Roboto Condensed', 'Arial Narrow', Arial, sans-serif" };
+function sheetFace() { try { return FACES[(P && P.page && P.page.font) || "montserrat"] || FACES.montserrat; } catch (e) { return FACES.montserrat; } }
+function textW(t, size, weight) { measureCtx.font = `${weight||400} ${size}px ${sheetFace()}`; return measureCtx.measureText(t).width; }
 
 /* mix a colour with white: t=0 original, t=1 white */
 function tint(hexIn, t) {
@@ -473,6 +492,36 @@ const DEFAULT_STYLES = [
   { name: "ML_Circle",   shape: "circle",   behaviour: "Move",    fill: "#FFD200", stroke: "#163E6B", notes: "Circuit Book" },
   ...curtainDefaults(),
 ];
+/* Summary style (Charlie): colour by type of work for umbrella rows, possession tiles by access type, and the
+   sheet-wide marks that tell the story: gate lines, a phase band, and zones with large upright labels. */
+function summaryStyleDefaults() {
+  return [
+    { name: "U_DESIGN",    shape: "container-umbrella", behaviour: "Stretch", fill: "#4E8A86", stroke: "#2F5F5C", notes: "Design" },
+    { name: "U_CONSTRUCT", shape: "container-umbrella", behaviour: "Stretch", fill: "#F0A35E", stroke: "#B8621A", notes: "Construction" },
+    { name: "U_BUILDING",  shape: "container-umbrella", behaviour: "Stretch", fill: "#6F93CF", stroke: "#3E5F99", notes: "Buildings & structures" },
+    { name: "U_UTILITY",   shape: "container-umbrella", behaviour: "Stretch", fill: "#A3A3A3", stroke: "#6B6B6B", notes: "Utilities & enabling works" },
+    { name: "POS_WE",    shape: "tile", behaviour: "Stretch", fill: "#E2231A", stroke: "#7E0B06", notes: "Weekend possession (SCAS)" },
+    { name: "POS_NIGHT", shape: "tile", behaviour: "Stretch", fill: "#1F3A6E", stroke: "#0B1A36", notes: "Night possession" },
+    { name: "POS_EXT",   shape: "tile", behaviour: "Stretch", fill: "#F5C400", stroke: "#7A6100", notes: "Extended possession" },
+    { name: "POS_ADD",   shape: "tile", behaviour: "Stretch", fill: "#B39DDB", stroke: "#5E4A8C", notes: "Additional possession" },
+    { name: "GATE",        shape: "gate", behaviour: "Curtain", fill: "#E8202A", stroke: "#E8202A", notes: "Key date (gate)", opacity: 1, legend: false },
+    { name: "BAND_OPEN",   shape: "band", behaviour: "Curtain", fill: "#A9BEDC", stroke: "#7F97BC", notes: "Phase: open", opacity: 1, legend: false },
+    { name: "BAND_CLOSED", shape: "band", behaviour: "Curtain", fill: "#4A5F80", stroke: "#2E3E58", notes: "Phase: closed", opacity: 1, legend: false },
+    { name: "ZONE_TC",     shape: "solid",   behaviour: "Curtain", fill: "#E7EFDB", stroke: "#B7C79C", notes: "Zone: testing & commissioning", opacity: .9, tagPos: "inside", legend: false },
+    { name: "ZONE_ASSURE", shape: "hatched", behaviour: "Curtain", fill: "#A6A6A6", stroke: "#6E6E6E", notes: "Zone: assurance", opacity: .7, tagPos: "inside", legend: false },
+    { name: "ZONE_CONT",   shape: "edges",   behaviour: "Curtain", fill: "#ECECEC", stroke: "#BDBDBD", notes: "Zone: contingency", opacity: .85, tagPos: "inside", legend: false },
+    { name: "ZONE_PC",     shape: "solid",   behaviour: "Curtain", fill: "#DCE7F5", stroke: "#AFC4E3", notes: "Zone: completion", opacity: .9, tagPos: "inside", legend: false },
+  ];
+}
+function ensureSummaryStyles(p) {
+  for (const s of summaryStyleDefaults()) if (!p.styles.some(x => x.name === s.name)) p.styles.push(clone(s));
+}
+const isShape = (p, it, shape) => styleOf(p, it.style).shape === shape;
+const curtainKind = (p, it) => { const sh = styleOf(p, it.style).shape; return sh === "gate" || sh === "band" ? sh : tagFmt(it, styleOf(p, it.style)).tagPos === "inside" ? "zone" : "curtain"; };
+const isUmbrella = (p, it) => styleOf(p, it.style).shape === "container-umbrella";
+/* readable text on a filled bar: white on dark colours, ink on light */
+function textOn(hex) { const h = String(hex || "#FFFFFF").replace("#", ""), [r, g, b] = [0, 2, 4].map(i => parseInt(h.substr(i, 2), 16) / 255); return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.55 ? "#FFFFFF" : BRAND.ink; }
+
 /* Curtains: shaded date ranges that run through every lane (contingency, savings, allowances).
    opacity is the fill's see-through level; days is how the duration shows in the tag: "", "plain", "+" or "−". */
 function curtainDefaults() {
@@ -848,8 +897,10 @@ function layout(opts) {
   const ppd = opts.ppd, t0 = toDays(P.timeline.start), t1 = toDays(P.timeline.end) + 1;
   const W = G.headW + (t1 - t0) * ppd, x = d => G.headW + (toDays(d) - t0) * ppd;
   const tags = layoutCurtainTags(x, ppd, W);
+  // a phase band (e.g. Station open / closed) gets a row of its own under the timeline, only when used
+  const phaseH = P.items.some(i => isCurtain(P, i.style) && isShape(P, i, "band")) ? 24 : 0;
   // curtain tag strip: a band of its own between the timeline and the first lane, only when used
-  const bandTop = G.hdrH, stripTop = bandTop + G.topH, stripH = tags.groups.strip.height ? tags.groups.strip.height + 6 : 0;
+  const bandTop = G.hdrH, phaseTop = bandTop + G.topH, stripTop = phaseTop + phaseH, stripH = tags.groups.strip.height ? tags.groups.strip.height + 6 : 0;
   const bodyTop = stripTop + stripH;
   let y = bodyTop; const lanes = [];
   for (const l of P.lanes) {
@@ -868,7 +919,7 @@ function layout(opts) {
         : (bodyTop + bodyBottom) / 2 - grp.height / 2 + t.row * step;
   }
   const ftrH = opts.ftrH || G.ftrH;   // the footer grows when the legend and key need more lines
-  return { ppd, t0, t1, W, bandTop, stripTop, stripH, bodyTop, bodyBottom, H: y + G.botH + ftrH, ftrH, lanes, tags: tags.list, x, rowH: G.rowH, spare: !!opts.spare, print: !!opts.print };
+  return { ppd, t0, t1, W, bandTop, phaseTop, phaseH, stripTop, stripH, bodyTop, bodyBottom, H: y + G.botH + ftrH, ftrH, lanes, tags: tags.list, x, rowH: G.rowH, spare: !!opts.spare, print: !!opts.print };
 }
 
 /* ---------- curtain tags: position, alignment, size, style and colours ---------- */
@@ -887,7 +938,8 @@ function tagFmt(it, st) {
 function layoutCurtainTags(x, ppd, W) {
   const groups = { strip: { rows: [], height: 0, step: 0 }, top: { rows: [], height: 0, step: 0 }, middle: { rows: [], height: 0, step: 0 }, bottom: { rows: [], height: 0, step: 0 } };
   const list = [];
-  P.items.filter(it => isCurtain(P, it.style)).sort((a, b) => toDays(a.start) - toDays(b.start)).forEach(it => {
+  // gates, phase bands and zones carry their own large labels, so they take no tag
+  P.items.filter(it => isCurtain(P, it.style) && curtainKind(P, it) === "curtain").sort((a, b) => toDays(a.start) - toDays(b.start)).forEach(it => {
     const st = styleOf(P, it.style), f = tagFmt(it, st), sz = TAG_SIZES[f.tagSize] || TAG_SIZES.M;
     const x1 = Math.max(G.headW, x(it.start)), x2 = Math.min(W, x(it.end) + ppd);
     if (x2 <= x1) return;
@@ -939,7 +991,7 @@ function draw(svg, opts) {
   svg.innerHTML = "";
   svg.setAttribute("width", L.W); svg.setAttribute("height", L.H);
   svg.setAttribute("viewBox", `0 0 ${L.W} ${L.H}`);
-  const F = { font: opts.font || "Montserrat, Arial, sans-serif" };
+  const F = { font: opts.font || sheetFace() };
   el("rect", { x: 0, y: 0, width: L.W, height: L.H, fill: "#FFFFFF" }, svg);
 
   drawHeader(svg, L, F, opts);
@@ -968,18 +1020,21 @@ function draw(svg, opts) {
 
   // curtains: shading behind the bars, tags and drag handles above them
   const curtains = P.items.filter(it => isCurtain(P, it.style));
-  drawCurtainShades(svg, curtains, L);
+  drawCurtainShades(svg, curtains.filter(it => curtainKind(P, it) !== "gate"), L, opts, F);
 
   // relationship arrows sit behind the bars, so bars and labels stay clean
   if (lg.links && L.cp) drawLinks(svg, L);
   // items
   const gi = el("g", {}, svg);
-  // summary bars first so the bars inside them draw on top
-  const ordered = [...P.items].sort((a, b) => (isContainer(P, b) ? 1 : 0) - (isContainer(P, a) ? 1 : 0));
+  // summary bars first so the bars inside them draw on top; possession tiles last, on top of the stages
+  const rank = it => isContainer(P, it) ? 0 : isShape(P, it, "tile") ? 2 : 1;
+  const ordered = [...P.items].sort((a, b) => rank(a) - rank(b));
   for (const it of ordered) {
     const ln = L.lanes.find(x => x.l.id === it.lane); if (!ln || hiddenByCollapse(P, it)) continue;
     drawItem(gi, it, ln, L, opts, F);
   }
+  // key-date gate lines run over everything
+  drawCurtainShades(svg, curtains.filter(it => curtainKind(P, it) === "gate"), L, opts, F);
   drawProgressLine(svg, L, F);
   drawCurtainTags(svg, L, opts, F);
 
@@ -996,6 +1051,7 @@ function draw(svg, opts) {
 
   drawBand(svg, L, L.bandTop, F);
   drawBand(svg, L, L.bodyBottom, F);
+  drawPhaseBands(svg, L, F, opts);
   el("line", { x1: 0, x2: L.W, y1: L.stripTop, y2: L.stripTop, stroke: BRAND.navy, "stroke-width": 1.2, "pointer-events": "none" }, svg);
   if (L.stripH) el("line", { x1: 0, x2: L.W, y1: L.bodyTop, y2: L.bodyTop, stroke: BRAND.navy, "stroke-width": .9, "pointer-events": "none" }, svg);
   el("line", { x1: 0, x2: L.W, y1: L.bodyBottom, y2: L.bodyBottom, stroke: BRAND.navy, "stroke-width": 1.2, "pointer-events": "none" }, svg);
@@ -1105,10 +1161,32 @@ function curtainColours(it) {
   const st = styleOf(P, it.style);
   return { st, fill: it.fill || st.fill || BRAND.orange, stroke: it.stroke || st.stroke || BRAND.navy, opacity: it.opacity ?? st.opacity ?? 0.18 };
 }
-function drawCurtainShades(svg, curtains, L) {
-  const g = el("g", { "pointer-events": "none" }, svg), y1 = L.stripTop, h = L.bodyBottom - L.stripTop;
+/* the rows a curtain covers: every lane, or only the lanes from it.zone[0] to it.zone[1] (e.g. a T&C zone over the platforms) */
+function curtainY(it, L) {
+  if (Array.isArray(it.zone) && it.zone.length) {
+    const ls = L.lanes.filter(x => it.zone.includes(x.l.id)).sort((a, b) => a.y - b.y);
+    const a = ls[0], b = ls[ls.length - 1] || a;
+    if (a) { const i0 = L.lanes.indexOf(a), i1 = L.lanes.indexOf(b); return [L.lanes[Math.min(i0, i1)].y, L.lanes[Math.max(i0, i1)].y + L.lanes[Math.max(i0, i1)].h]; }
+  }
+  return [L.stripTop, L.bodyBottom];
+}
+function drawCurtainShades(svg, curtains, L, opts = {}, F = { font: sheetFace() }) {
+  const g = el("g", { "pointer-events": "none" }, svg), hits = el("g", {}, svg);
   for (const it of curtains) {
+    const kind = curtainKind(P, it);
+    if (kind === "band") continue;   // drawn in its own row under the timeline
     const { st, fill, stroke, opacity } = curtainColours(it);
+    const [y1, yEnd] = curtainY(it, L), h = yEnd - y1;
+    const selected = !opts.print && isSel(it.id);
+    if (kind === "gate") {   // a key date: a full-height line with its name running up beside it
+      const x = L.x(it.start) + L.ppd / 2;
+      el("line", { x1: x, x2: x, y1, y2: yEnd, stroke: fill, "stroke-width": 2.2 }, g);
+      const size = 15, ty = y1 + 8;
+      el("text", { x: x - 4, y: ty, transform: `rotate(-90 ${x - 4} ${ty})`, "text-anchor": "end", fill, "font-size": size, "font-weight": 500, "font-family": F.font }, g, it.name);
+      if (!opts.print) el("rect", { x: x - 9, y: y1, width: 12, height: Math.min(h, textW(it.name, size, 500) + 16), fill: "transparent", "data-id": it.id, "data-part": "body", style: "cursor:grab" }, hits);
+      if (selected) el("rect", { x: x - 10, y: y1, width: 14, height: h, fill: "none", stroke: BRAND.orange, "stroke-width": 1.6 }, g);
+      continue;
+    }
     const x1 = Math.max(G.headW, L.x(it.start)), x2 = Math.min(L.W, L.x(it.end) + L.ppd), w = x2 - x1;
     if (w <= 0) continue;
     el("rect", { x: x1, y: y1, width: w, height: h, fill, "fill-opacity": opacity }, g);
@@ -1120,6 +1198,42 @@ function drawCurtainShades(svg, curtains, L) {
       }
     }
     if (st.shape !== "solid") for (const x of [x1, x2]) el("line", { x1: x, x2: x, y1, y2: y1 + h, stroke, "stroke-width": 1.1, "stroke-dasharray": "5 3" }, g);
+    if (kind === "zone") {   // a zone names itself in large upright letters (with an optional second line)
+      const cx = (x1 + x2) / 2, cy = y1 + h / 2, room = h - 24, sub = it.sub || "";
+      let size = Math.max(9, Math.min(26, w * (sub ? .32 : .48)));
+      while (size > 8 && textW(it.name, size, 700) > room) size -= .5;
+      let ss = size * .62; while (ss > 7 && textW(sub, ss, 500) > room) ss -= .5;
+      const ink = textOn(fill), tg = el("g", { transform: `rotate(-90 ${cx} ${cy})` }, g);
+      const dy = sub ? -ss * .55 : 0;
+      el("text", { x: cx, y: cy + size * .36 + dy, "text-anchor": "middle", fill: ink, "font-size": size, "font-weight": 700, "font-family": F.font }, tg, it.name);
+      if (sub) el("text", { x: cx, y: cy + size * .36 + dy + ss * 1.15, "text-anchor": "middle", fill: ink, "font-size": ss, "font-weight": 500, "font-family": F.font }, tg, sub);
+      if (!opts.print) {
+        const lw = Math.max(textW(it.name, size, 700), textW(sub, ss, 500));
+        el("rect", { x: cx - size, y: cy - lw / 2, width: size * 2, height: lw, fill: "transparent", "data-id": it.id, "data-part": "body", style: "cursor:grab" }, hits);
+        el("rect", { x: x1 - 3, y: y1, width: 6, height: h, fill: "transparent", "data-id": it.id, "data-part": "l", style: "cursor:ew-resize" }, hits);
+        el("rect", { x: x2 - 3, y: y1, width: 6, height: h, fill: "transparent", "data-id": it.id, "data-part": "r", style: "cursor:ew-resize" }, hits);
+      }
+      if (selected) el("rect", { x: x1, y: y1, width: w, height: h, fill: "none", stroke: BRAND.orange, "stroke-width": 2 }, g);
+    }
+  }
+}
+/* the phase band: e.g. "Station Open" / "Station Closed (24 months)" in a row under the timeline */
+function drawPhaseBands(svg, L, F, opts) {
+  if (!L.phaseH) return;
+  const g = el("g", {}, svg), y = L.phaseTop + 1, h = L.phaseH - 2;
+  el("rect", { x: G.headW, y: L.phaseTop, width: L.W - G.headW, height: L.phaseH, fill: "#FFFFFF", "pointer-events": "none" }, g);
+  for (const it of P.items.filter(i => isCurtain(P, i.style) && isShape(P, i, "band"))) {
+    const { fill } = curtainColours(it), x1 = Math.max(G.headW, L.x(it.start)), x2 = Math.min(L.W, L.x(it.end) + L.ppd), w = x2 - x1;
+    if (w <= 0) continue;
+    const grp = el("g", { "data-id": it.id, style: opts.print ? null : "cursor:grab" }, g);
+    el("rect", { x: x1, y, width: w, height: h, fill, "data-id": it.id, "data-part": "body" }, grp);
+    let size = 14; while (size > 7 && textW(it.name, size, 700) > w - 8) size -= .5;
+    el("text", { x: x1 + w / 2, y: y + h / 2 + size * .36, "text-anchor": "middle", fill: textOn(fill), "font-size": size, "font-weight": 700, "font-family": F.font, "pointer-events": "none" }, grp, it.name);
+    if (!opts.print) {
+      el("rect", { x: x1 - 3, y, width: 6, height: h, fill: "transparent", "data-id": it.id, "data-part": "l", style: "cursor:ew-resize" }, grp);
+      el("rect", { x: x2 - 3, y, width: 6, height: h, fill: "transparent", "data-id": it.id, "data-part": "r", style: "cursor:ew-resize" }, grp);
+      if (isSel(it.id)) el("rect", { x: x1 - 1, y: y - 1, width: w + 2, height: h + 2, fill: "none", stroke: BRAND.orange, "stroke-width": 1.8, "pointer-events": "none" }, grp);
+    }
   }
 }
 /* curtain tags, placed by layoutCurtainTags; the tag is also the handle for dragging the curtain */
@@ -1179,7 +1293,8 @@ function footerPlan(L, keyList) {
   const headW = Math.max(textW("Legend:", 11, 700), textW("Key:", 11, 700)) + 14, indent = left + headW;
   const entries = [{ kind: "heading", text: "Legend:", w: headW }];
   // milestone types, curtains, and bar types with their own colour (lane-coloured bars need no key)
-  P.styles.filter(s => (s.behaviour !== "Stretch" || s.fill) && P.items.some(i => i.style === s.name))
+  // (gates, phase bands and zones name themselves on the sheet, so they stay out of the legend)
+  P.styles.filter(s => (s.behaviour !== "Stretch" || s.fill) && s.legend !== false && !["gate", "band"].includes(s.shape) && P.items.some(i => i.style === s.name))
     .forEach(s => { const icon = s.behaviour === "Move" ? 18 : 28; entries.push({ kind: "style", s, icon, w: icon + textW(s.notes || s.name, 9.5, 500) + 22 }); });
   // progress symbols, when shown
   const pr = prog(), extra = (what, label) => entries.push({ kind: "extra", what, label, icon: 28, w: 28 + textW(label, 9.5, 500) + 22 });
@@ -1267,6 +1382,22 @@ function drawBand(svg, L, y0, F) {
   const g = el("g", { "pointer-events": "none" }, svg);
   const yh = 22, mh = G.topH - yh;
   el("rect", { x: 0, y: y0, width: L.W, height: G.topH, fill: "#FFFFFF" }, g);
+  if (P.page.header === "bold") {   // summary style: large years, months alternating black and white
+    const years = [];
+    eachMonth(L, (xa, xb, dt, i) => {
+      const y = dt.getUTCFullYear(), last = years[years.length - 1];
+      if (!last || last.y !== y) years.push({ y, a: xa, b: xb }); else last.b = xb;
+      const dark = i % 2 === 1, w = xb - xa, lab = w > 22 ? MON[dt.getUTCMonth()].toUpperCase() : w > 9 ? MON[dt.getUTCMonth()][0] : "";
+      el("rect", { x: xa, y: y0 + yh, width: w, height: mh, fill: dark ? "#111111" : "#FFFFFF", stroke: "#111111", "stroke-width": .5 }, g);
+      if (lab) el("text", { x: (xa + xb) / 2, y: y0 + yh + mh / 2 + 4, "text-anchor": "middle", fill: dark ? "#FFFFFF" : "#111111", "font-size": 11.5, "font-weight": 700, "font-family": F.font }, g, lab);
+    });
+    years.forEach(yr => {
+      el("line", { x1: yr.a, x2: yr.a, y1: y0, y2: y0 + yh, stroke: "#111111", "stroke-width": 1 }, g);
+      if (yr.b - yr.a > 34) el("text", { x: (yr.a + yr.b) / 2, y: y0 + yh / 2 + 7, "text-anchor": "middle", fill: "#111111", "font-size": 19, "font-weight": 700, "font-family": F.font }, g, yr.y);
+    });
+    el("line", { x1: G.headW, x2: L.W, y1: y0 + yh, y2: y0 + yh, stroke: "#111111", "stroke-width": 1 }, g);
+    return;
+  }
   const years = [];
   eachMonth(L, (xa, xb, dt, i) => {
     const y = dt.getUTCFullYear(), last = years[years.length - 1];
@@ -1285,17 +1416,23 @@ function drawBand(svg, L, y0, F) {
 /* lane titles: one line if it fits the lane, else split into two balanced lines */
 const TITLE = { size: 9.5, weight: 700 };
 function titleLines(name, maxW) {
-  const t = name.toUpperCase(), words = t.split(/\s+/);
-  if (words.length < 2 || textW(t, TITLE.size, TITLE.weight) <= maxW) return [t];
+  const t = name.toUpperCase(), words = t.split(/\s+/), W = s => textW(s, TITLE.size, TITLE.weight);
+  if (words.length < 2 || W(t) <= maxW) return [t];
+  // the fewest lines (up to three, the lane head is narrow) that fit, each split as even as it can be
   let best = null;
-  for (let i = 1; i < words.length; i++) {
-    const a = words.slice(0, i).join(" "), b = words.slice(i).join(" ");
-    const w = Math.max(textW(a, TITLE.size, TITLE.weight), textW(b, TITLE.size, TITLE.weight));
-    if (!best || w < best.w) best = { w, lines: [a, b] };
+  for (let k = 2; k <= Math.min(3, words.length); k++) {
+    best = null;
+    const cuts = k === 2 ? [...Array(words.length - 1).keys()].map(i => [i + 1])
+      : [...Array(words.length - 1).keys()].flatMap(i => [...Array(words.length - 2 - i).keys()].map(j => [i + 1, i + 2 + j]));
+    for (const c of cuts) {
+      const lines = [0, ...c].map((x, n) => words.slice(x, [...c, words.length][n]).join(" ")), w = Math.max(...lines.map(W));
+      if (!best || w < best.w) best = { w, lines };
+    }
+    if (best.w <= maxW) break;
   }
   return best.lines;
 }
-/* the shortest lane height that still fits the title on two lines */
+/* the shortest lane height that still fits the title (on up to three lines) */
 function laneTitleLen(name) {
   const lines = titleLines(name, 0);
   return Math.max(...lines.map(s => textW(s, TITLE.size, TITLE.weight)));
@@ -1308,7 +1445,8 @@ function vText(parent, text, cx, cy, maxW, size, weight, fill, F, laneId) {
 }
 
 /* ---------- bar labels: inside, right, above, numbered key, or hidden ---------- */
-const LABEL_MODES = [["auto", "Auto"], ["inside", "Inside"], ["left", "Left"], ["right", "Right"], ["above", "Above"], ["key", "Key no."], ["none", "Hide"]];
+const LABEL_MODES = [["auto", "Auto"], ["inside", "Inside"], ["left", "Left"], ["right", "Right"], ["above", "Above"], ["below", "Below"], ["upright", "Upright"], ["key", "Key no."], ["none", "Hide"]];
+const CAPTION_FONT = 6.6, STAGE_FONT = 7.6;   // captions under possession tiles; stage names inside umbrella rows
 const ABOVE_FONT = 7.5;
 /* Decides where each bar's name goes. Auto: inside if it fits, else to the right if there's room before the
    next thing on the row, else to the left if there's room after the previous thing, else above the bar if
@@ -1331,7 +1469,7 @@ function planLabels(L) {
     // summary titles: to the left of the bracket when there's room, otherwise to its right
     for (const c of containers) {
       const x1 = L.x(c.start), x2 = L.x(c.end) + L.ppd, tw = textW(c.name, 8.5, 700) + (L.print ? 0 : 12);
-      if (styleOf(P, c.style).shape === "container-box") { take(occ, c.row, x1, x2); out.set(c.id, { titleSide: "inside" }); continue; }
+      if (styleOf(P, c.style).shape === "container-box" || isUmbrella(P, c)) { take(occ, c.row, x1, x2); out.set(c.id, { titleSide: "inside" }); continue; }
       const leftEdge = Math.max(G.headW + 4, ...(occ.get(c.row) || []).filter(([, b]) => b <= x1 + 1).map(([, b]) => b + 4));
       const side = x1 - 7 - tw >= leftEdge && free(occ, c.row, x1 - 7 - tw, x1) ? "left" : "right";
       take(occ, c.row, x1, x2);
@@ -1339,9 +1477,19 @@ function planLabels(L) {
       out.set(c.id, { titleSide: side });
     }
     const bars = its.filter(i => !isContainer(P, i) && !isMs(P, i.style)).sort((a, b) => toDays(a.start) - toDays(b.start) || a.row - b.row);
+    const captions = [];   // things captioned underneath (tiles, short stages), placed after the loop
     for (const i of bars) {
       const st = styleOf(P, i.style), x1 = L.x(i.start), x2 = L.x(i.end) + L.ppd, w = x2 - x1;
-      const tw = textW(i.name, 9, 500), parent = parentOf.get(i.id);
+      const parent = parentOf.get(i.id), umb = parent && isUmbrella(P, parent);
+      // possession tiles: a caption below when they sit on a work row, the name upright inside on the possession lane
+      if (st.shape === "tile") { out.set(i.id, { mode: i.labelMode && i.labelMode !== "auto" ? i.labelMode : parent ? "below" : "upright", auto: !i.labelMode }); captions.push(i); continue; }
+      // an umbrella's stages: the name inside in small type, or below when the stage is too short
+      if (umb) {
+        const roomBelow = (+parent.span || 2) > Math.max(...containerChildren(P, parent).map(k => k.row)) - parent.row + 1;
+        const fits = textW(i.name, STAGE_FONT, 500) + 6 < w, m = i.labelMode && i.labelMode !== "auto" ? i.labelMode : fits ? "inside" : roomBelow ? "below" : "none";
+        out.set(i.id, { mode: m, auto: !i.labelMode, small: true }); if (m === "below") captions.push(i); continue;
+      }
+      const tw = textW(i.name, 9, 500);
       const limit = Math.min(parent ? L.x(parent.end) + L.ppd - 3 : L.W - 4,
         ...(occ.get(i.row) || []).filter(([a]) => a >= x2 - 1 && a > x1).map(([a]) => a - 4));
       const fitsInside = st.shape !== "summary" && tw + 10 < w;
@@ -1362,6 +1510,16 @@ function planLabels(L) {
       if (mode === "key") { plan.n = keyList.length + 1; keyList.push({ n: plan.n, name: i.name }); }
       out.set(i.id, plan);
     }
+    // captions: left to right on each row, on the first of two levels with room, else left off (the tile keeps its tooltip)
+    const levels = new Map();
+    for (const i of captions.sort((a, b) => toDays(a.start) - toDays(b.start))) {
+      const plan = out.get(i.id); if (plan.mode !== "below") continue;
+      const x1 = L.x(i.start), w = Math.max(L.x(i.end) + L.ppd - x1, 7), cx = x1 + w / 2, half = textW(i.name, CAPTION_FONT, 700) / 2;
+      const lv = levels.get(i.row) || levels.set(i.row, [-1e9, -1e9]).get(i.row);
+      const k = lv.findIndex(r => r < cx - half - 3);
+      if (k < 0) { plan.mode = "none"; continue; }
+      lv[k] = cx + half; plan.level = k;
+    }
   }
   out.keyList = keyList;
   return out;
@@ -1374,6 +1532,7 @@ function keyBadge(g, x, cy, n, F, stroke) {
    and a faint square shade behind its bars. Box style: a square outline round the title row and its bars.
    Collapsed: just the bracket (or a one-row box), with the group's milestones drawn on it. */
 function drawContainer(g, it, ln, L, opts, F) {
+  if (isUmbrella(P, it)) return drawUmbrella(g, it, ln, L, opts, F);
   const st = styleOf(P, it.style), stroke = it.stroke || st.stroke || BRAND.navy, box = st.shape === "container-box";
   const shade = it.fill || st.fill || tint(ln.l.colour, box ? .94 : .9);
   const x1 = L.x(it.start), x2 = L.x(it.end) + L.ppd, w = Math.max(6, x2 - x1);
@@ -1423,10 +1582,47 @@ function drawContainer(g, it, ln, L, opts, F) {
   }
 }
 
+/* Umbrella row (summary style): one bold bar naming the work across its whole span, with its stages chained on
+   the row below in a lighter shade of the same colour, and possession tiles over them. */
+const umbrellaColour = (c, lane) => c.fill || styleOf(P, c.style).fill || (lane ? lane.colour : BRAND.navy);
+function drawUmbrella(g, it, ln, L, opts, F) {
+  const st = styleOf(P, it.style), col = umbrellaColour(it, ln.l), stroke = it.stroke || st.stroke || shade(col, .25);
+  const x1 = L.x(it.start), x2 = L.x(it.end) + L.ppd, w = Math.max(6, x2 - x1);
+  const top = ln.y + G.pad + ln.toView(it.row) * G.rowH, kids = containerChildren(P, it), open = !it.collapsed;
+  const bottom = top + (open ? spanOf(it) : 1) * G.rowH, selected = !opts.print && isSel(it.id);
+  const grp = el("g", { "data-id": it.id }, g);
+  const h = Math.max(10, G.rowH - 3), y = top + (G.rowH - h) / 2;
+  el("rect", { x: x1, y, width: w, height: h, fill: col, stroke, "stroke-width": .8, "pointer-events": "none" }, grp);
+  let size = Math.min(15, h * .8); const title = it.name + (it.collapsed && !opts.print ? `  (${kids.length})` : "");
+  while (size > 7 && textW(title, size, 700) > w - 8) size -= .5;
+  el("text", { x: x1 + w / 2, y: y + h / 2 + size * .36, "text-anchor": "middle", fill: textOn(col), "font-size": size, "font-weight": 700, "font-family": F.font, "pointer-events": "none" }, grp, title);
+  if (!open) kids.filter(k => isMs(P, k.style) || isShape(P, k, "tile")).forEach(k => { const c = itemColours(k, ln.l); if (isMs(P, k.style)) drawMarker(grp, styleOf(P, k.style).shape, L.x(k.start) + L.ppd / 2, y + h / 2, G.ms * .7, c.fill, c.stroke); });
+  if (selected) el("rect", { x: x1 - 2, y: top - 1, width: w + 4, height: bottom - top + 2, fill: "none", stroke: BRAND.orange, "stroke-width": 1.6, "pointer-events": "none" }, grp);
+  if (!opts.print) {
+    el("rect", { x: x1, y: top, width: w, height: G.rowH, fill: "transparent", "data-id": it.id, "data-part": "body", style: "cursor:grab" }, grp);
+    el("rect", { x: x1 + 2, y: y + 1, width: 12, height: h - 2, fill: "transparent", "data-id": it.id, "data-part": "toggle", style: "cursor:pointer" }, grp);
+    if (open) el("rect", { x: x1, y: bottom - 5, width: w, height: 10, fill: "transparent", "data-id": it.id, "data-part": "b", style: "cursor:ns-resize" }, grp);
+    if (it.fitChildren === false || !kids.length) {
+      el("rect", { x: x1 - 3, y: top, width: 7, height: G.rowH, fill: "transparent", "data-id": it.id, "data-part": "l", style: "cursor:ew-resize" }, grp);
+      el("rect", { x: x2 - 4, y: top, width: 7, height: G.rowH, fill: "transparent", "data-id": it.id, "data-part": "r", style: "cursor:ew-resize" }, grp);
+    }
+  }
+}
+/* a caption under a tile or short stage: up to two short lines, small and bold */
+function captionLines(text, maxW) {
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  if (textW(text, CAPTION_FONT, 700) <= maxW || words.length < 2) return [text];
+  let best = null;
+  for (let i = 1; i < words.length; i++) { const a = words.slice(0, i).join(" "), b = words.slice(i).join(" "); const m = Math.max(textW(a, CAPTION_FONT, 700), textW(b, CAPTION_FONT, 700)); if (!best || m < best.m) best = { m, lines: [a, b] }; }
+  return best.lines;
+}
 function drawItem(g, it, ln, L, opts, F) {
   if (isContainer(P, it)) return drawContainer(g, it, ln, L, opts, F);
   const st = styleOf(P, it.style);
-  const { fill, stroke } = itemColours(it, ln.l);
+  let { fill, stroke } = itemColours(it, ln.l);
+  // an umbrella's stages take a lighter shade of its colour (unless they have their own)
+  const par = it.parent && P.items.find(x => x.id === it.parent), inUmbrella = par && isUmbrella(P, par);
+  if (inUmbrella && st.shape !== "tile") { const uc = umbrellaColour(par, ln.l); if (!it.fill && !st.fill) fill = tint(uc, .55); if (!it.stroke) stroke = shade(uc, .1); }
   const cy = ln.y + G.pad + ln.toView(it.row) * G.rowH + G.rowH / 2;
   const selected = !opts.print && isSel(it.id);
   const grp = el("g", { "data-id": it.id, style: opts.print ? null : "cursor:grab" }, g);
@@ -1466,9 +1662,19 @@ function drawItem(g, it, ln, L, opts, F) {
     if (pr.baseline && it.bStart) drawBaseline(grp, it, L, y + h);
     // done so far: the bar filled to its full height in a stronger shade, from the start to the % complete
     if (pct > 0 && st.shape !== "summary") el("rect", { x: x1, y, width: w * pct / 100, height: h, fill: progressColour(it, ln.l), stroke: edge, "stroke-width": sw, "pointer-events": "none" }, grp);
-    const tw = textW(it.name, 9, 500), plan = L.labels?.get(it.id) || { mode: tw + 10 < w ? "inside" : "right" };
-    const text = { fill: BRAND.navy, "font-size": 9, "font-weight": 500, "font-family": F.font, "pointer-events": "none" };
-    if (plan.mode === "inside") el("text", { x: x1 + w / 2, y: cy + 3.3, "text-anchor": "middle", ...text }, grp, it.name);
+    const plan = L.labels?.get(it.id) || { mode: textW(it.name, 9, 500) + 10 < w ? "inside" : "right" };
+    const fs = plan.small ? STAGE_FONT : 9, tw = textW(it.name, fs, 500);
+    const text = { fill: BRAND.navy, "font-size": fs, "font-weight": 500, "font-family": F.font, "pointer-events": "none" };
+    const tile = st.shape === "tile", tx = tile ? x1 + Math.max(w, 7) / 2 : x1 + w / 2;
+    if (tile && !opts.print) el("title", {}, grp, `${it.note || it.name} · ${fmt(it.start)}${it.end !== it.start ? " – " + fmt(it.end) : ""}`);
+    if (plan.mode === "below") {   // caption under the tile or stage, centred, up to two lines
+      el("text", { x: tx, y: y + h + (tile ? 3 : 0) + 7 + (plan.level || 0) * (CAPTION_FONT + 1.6), "text-anchor": "middle", fill: BRAND.ink, "font-size": CAPTION_FONT, "font-weight": 700, "font-family": F.font, "pointer-events": "none" }, grp, it.name);
+    } else if (plan.mode === "upright") {   // possession lane: the name runs up inside the tile
+      const cx = tx, cyy = cy; let s2 = 7; const room = h + 4;
+      while (s2 > 4.5 && textW(it.name, s2, 700) > room) s2 -= .25;
+      el("text", { x: cx, y: cyy + s2 * .36, transform: `rotate(-90 ${cx} ${cyy})`, "text-anchor": "middle", fill: textOn(fill), "font-size": s2, "font-weight": 700, "font-family": F.font, "pointer-events": "none" }, grp, it.name);
+    }
+    else if (plan.mode === "inside") el("text", { x: x1 + w / 2, y: cy + fs * .37, "text-anchor": "middle", ...text }, grp, it.name);
     else if (plan.mode === "right") el("text", { x: x2 + 5, y: cy + 3.3, ...text }, grp, it.name);
     else if (plan.mode === "left") el("text", { x: x1 - 5, y: cy + 3.3, "text-anchor": "end", ...text }, grp, it.name);
     else if (plan.mode === "above") el("text", { x: x1 + 1, y: y - 2.2, ...text, "font-size": ABOVE_FONT, "font-weight": 600 }, grp, it.name);
@@ -1511,7 +1717,7 @@ function polyPts(x, cy, n, r, rot) {
   return Array.from({ length: n }, (_, i) => { const t = rot + i * 2 * Math.PI / n; return `${(x + r(i) * Math.cos(t)).toFixed(2)},${(cy + r(i) * Math.sin(t)).toFixed(2)}`; }).join(" ");
 }
 const MS_SHAPES = [["diamond","Diamond"],["triangle","Triangle"],["invtriangle","Inverted triangle"],["square","Square"],["circle","Circle"],["star","Star"],["hexagon","Hexagon"]];
-const BAR_SHAPES = [["bar","Plain bar"],["rounded","Rounded bar"],["poss","Hatched bar"],["dashed","Dashed outline"],["summary","Summary bracket (single bar)"],["container","Summary group · bracket"],["container-box","Summary group · square box"]];
+const BAR_SHAPES = [["bar","Plain bar"],["rounded","Rounded bar"],["poss","Hatched bar"],["dashed","Dashed outline"],["tile","Possession tile"],["summary","Summary bracket (single bar)"],["container","Summary group · bracket"],["container-box","Summary group · square box"],["container-umbrella","Umbrella · bold bar, stages below"]];
 
 /* ---------- summary groups: a bracket (or box) on its own row, with its bars in the rows below ----------
    Bars belong to a summary through it.parent. The summary's height follows its bars (c.span = rows from its
@@ -1545,6 +1751,8 @@ function syncContainers(p, opts = {}) {
     const kids = containerChildren(p, c), before = +c.span || 0;
     kids.forEach(k => { if (k.row <= c.row) k.row = c.row + 1; });          // bars sit below the bracket
     c.span = kids.length ? Math.max(...kids.map(k => k.row)) - c.row + 1 : 2;   // an empty summary keeps one row to drop into
+    // an umbrella keeps a row under its stages for the captions of its possession tiles and short stages
+    if (kids.length && styleOf(p, c.style).shape === "container-umbrella" && kids.some(k => k.labelMode === "below" || styleOf(p, k.style).shape === "tile")) c.span += 1;
     // a summary that grows pushes whatever sat just below it down, so nothing ends up underneath it
     if (before && c.span > before && !opts.noPush) {
       const grow = c.span - before, from = c.row + before, own = new Set(kids.map(k => k.id));
@@ -1576,6 +1784,11 @@ function hiddenRows(p, laneId) {
 }
 /* o.edge: an outline colour of its own (critical), o.sw: its width; everything else keeps the bar's colours */
 function drawBarShape(g, shape, x, y, w, h, fill, stroke, o = {}) {
+  if (shape === "tile") {   // a possession: a small upright tile with a dashed edge, at least wide enough to see
+    const tw = Math.max(w, 7);
+    el("rect", { x, y: y - 2, width: tw, height: h + 4, fill, stroke: o.edge || stroke, "stroke-width": o.sw || .9, "stroke-dasharray": "2 1.4" }, g);
+    return;
+  }
   if (shape === "summary") {   // thin bar with down-pointing ends, like a summary task
     const t = h * .38;
     el("polygon", { points: `${x},${y} ${x+w},${y} ${x+w},${y+h*.85} ${x+w-Math.min(6,w/3)},${y+t} ${x+Math.min(6,w/3)},${y+t} ${x},${y+h*.85}`, fill: stroke, stroke: o.edge || stroke, "stroke-width": o.edge ? o.sw : .6 }, g);
@@ -1625,7 +1838,13 @@ function drawPage(svg, extra = {}) {
 const pageName = () => `${P.page.size} ${P.page.orient}`;
 
 let LAY, PLAN = null;
+let condensedReady = false;
 function render() {
+  // the condensed face is a web font: measure and draw again once it has loaded, so labels fit exactly
+  if (P.page.font === "condensed" && !condensedReady && document.fonts) {
+    condensedReady = true;
+    Promise.all([document.fonts.load("500 10px 'Roboto Condensed'"), document.fonts.load("700 10px 'Roboto Condensed'")]).then(() => render(), () => {});
+  }
   const mode = P.view.mode || "page-width";
   $("viewMode").value = mode; $("zoomBox").hidden = mode !== "free";
   $("zoom").value = P.view.zoom;
@@ -2309,6 +2528,8 @@ function renderSideInner() {
     <div class="f"><label>Row spacing</label><div class="seg" role="group" aria-label="Row spacing">${SPACING.map(([k, n, v]) => `<button type="button" data-space="${v}" aria-pressed="${+P.page.rowH === v}">${n}</button>`).join("")}</div></div>
     <div class="f"><label for="pgRow">Row height: <span id="pgRowVal">${P.page.rowH}</span> px</label><input id="pgRow" type="range" min="14" max="40" step="1" value="${P.page.rowH}" style="accent-color:var(--accent-2)"></div>
     <label class="check"><input type="checkbox" id="pgFill" ${P.page.fill !== false ? "checked" : ""}> Spread rows to fill the page</label>
+    <div class="f"><label>Font</label><div class="seg" role="group" aria-label="Sheet font">${[["montserrat", "Montserrat"], ["condensed", "Condensed (summary)"]].map(([v, n]) => `<button type="button" data-font="${v}" aria-pressed="${(P.page.font || "montserrat") === v}">${n}</button>`).join("")}</div></div>
+    <div class="f"><label>Timeline header</label><div class="seg" role="group" aria-label="Timeline header">${[["classic", "Martinus"], ["bold", "Bold months"]].map(([v, n]) => `<button type="button" data-header="${v}" aria-pressed="${(P.page.header || "classic") === v}">${n}</button>`).join("")}</div></div>
     <div class="actions"><button class="btn" id="pgTidy" title="Move every lane's bars and milestones up into the fewest rows without overlaps">Tidy all lanes</button></div>
     ${PLAN && PLAN.fit < 0.98 ? `<p class="note" style="color:var(--warn)">The content is taller than this page and prints at ${Math.round(PLAN.fit * 100)}%. Try Compact spacing or Tidy all lanes.</p>` : ""}
     <h2>Timeline</h2>
@@ -2347,6 +2568,8 @@ function renderSideInner() {
   $("pgRow").oninput = e => { $("pgRowVal").textContent = e.target.value; P.page.rowH = +e.target.value; render(); };
   $("pgRow").onchange = e => { const v = +e.target.value; P.page.rowH = origRow; commit(p => p.page.rowH = v, true); };
   $("pgFill").onchange = e => commit(p => p.page.fill = e.target.checked, true);
+  side.querySelectorAll("[data-font]").forEach(b => b.onclick = () => commit(p => p.page.font = b.dataset.font, true));
+  side.querySelectorAll("[data-header]").forEach(b => b.onclick = () => commit(p => p.page.header = b.dataset.header, true));
   $("pgTidy").onclick = () => {
     const before = P.lanes.reduce((n, l) => n + laneRows(l, false), 0);
     commit(p => p.lanes.forEach(l => packLane(p, l.id)), true);
@@ -2685,7 +2908,7 @@ function bindItemExtras(cur) {
 
 /* tag format controls; f is the effective format (tagFmt), set(key, value) stores it */
 const TAG_CHOICES = {
-  tagPos: [["strip", "Strip"], ["top", "Top"], ["middle", "Middle"], ["bottom", "Bottom"]],
+  tagPos: [["strip", "Strip"], ["top", "Top"], ["middle", "Middle"], ["bottom", "Bottom"], ["inside", "Large, upright"]],
   tagAlign: [["left", "Left"], ["centre", "Centre"], ["right", "Right"]],
   tagSize: [["S", "S"], ["M", "M"], ["L", "L"]],
   tagStyle: [["pill", "Filled"], ["outline", "Outlined"], ["text", "Text only"]],
@@ -2767,7 +2990,7 @@ const KIND = {
   Stretch: { word: "bar",       Title: "Bar",       prefix: "BAR_", shapes: () => BAR_SHAPES },
   Curtain: { word: "curtain",   Title: "Curtain",   prefix: "CUR_", shapes: () => CURTAIN_SHAPES },
 };
-const CURTAIN_SHAPES = [["solid","Solid shading"],["edges","Shading with dashed edges"],["hatched","Hatched, dashed edges"]];
+const CURTAIN_SHAPES = [["solid","Solid shading"],["edges","Shading with dashed edges"],["hatched","Hatched, dashed edges"],["gate","Key-date line (full height)"],["band","Phase band (row under the timeline)"]];
 const DAYS_OPTIONS = [["","Tag only"],["plain","Tag · 10d"],["+","Tag · +10d"],["−","Tag · −10d"]];
 function addType(kind) {
   const label = `New ${KIND[kind].word} type`, base = { name: styleCode(label, kind, P), behaviour: kind, notes: label, autoCode: true };
@@ -3506,6 +3729,7 @@ function previewImport(parsed, fname) {
             if (r.preds !== undefined) { if (r.preds.length) it.preds = r.preds; else delete it.preds; }
           }
           if (r.p6) { if (r.p6.crit) it.p6crit = true; else delete it.p6crit; if (r.p6.tf != null) it.p6tf = r.p6.tf; else delete it.p6tf; }   // P6's float, quietly refreshed
+          if (r.x) Object.assign(it, r.x);
         }
         if (ddChange) p.progress = { ...prog(), ...(p.progress || {}), dataDate: ddNew };
         const reserved = new Set(parsed.rows.map(r => r.id).filter(Boolean));
@@ -3520,6 +3744,8 @@ function previewImport(parsed, fname) {
           if (!curtain && r.bStart) { it.bStart = r.bStart; it.bEnd = isMs(p, st) ? r.bStart : (r.bEnd || r.bStart); }
           if (!curtain && r.predsRaw) { const pr = parsePreds(r.predsRaw, allIds).filter(x => x.id !== id); if (pr.length) it.preds = pr; }
           if (r.p6) { if (r.p6.crit) it.p6crit = true; if (r.p6.tf != null) it.p6tf = r.p6.tf; }
+          if (r.x) Object.assign(it, r.x);
+          if (r.labelMode && r.labelMode !== "auto") it.labelMode = r.labelMode;
           it.row = curtain ? 0 : Number.isFinite(r.row) ? r.row : freeRow(p, it);
           p.items.push(it);
         }
@@ -3596,6 +3822,10 @@ function p6Model(T) {
   tasks.forEach(t => t.wbs.tasks.push(t));
   const byId = new Map(tasks.map(t => [t.id, t]));
   (T.TASKPRED || []).forEach(r => { const a = byId.get(r.pred_task_id), b = byId.get(r.task_id); if (a && b) { a.succs.push(b); b.preds.push(a); } });
+  // activity codes, e.g. { "NAS - SCAS Type": "WE SCAS", "NAS - SCAS Location": "P04" }
+  const ctype = new Map((T.ACTVTYPE || []).map(a => [a.actv_code_type_id, (a.actv_code_type || "").trim()]));
+  const cval = new Map((T.ACTVCODE || []).map(c => [c.actv_code_id, [ctype.get(c.actv_code_type_id) || "", (c.short_name || c.actv_code_name || "").trim()]]));
+  (T.TASKACTV || []).forEach(a => { const t = byId.get(a.task_id), c = cval.get(a.actv_code_id); if (t && c) (t.codes = t.codes || {})[c[0]] = c[1]; });
   const dataDate = day(proj.last_recalc_date) || day(proj.plan_start_date);
   // left out of the summary dates: unlinked activities sitting at the data date (placeholders, or work not tied
   // into the programme yet) and whatever only follows from them
@@ -3701,6 +3931,290 @@ function p6Build(M, rec) {
   rows.sort((a, b) => (order.get(a.lane) ?? -1) - (order.get(b.lane) ?? -1) || toDays(a.start) - toDays(b.start) || toDays(a.end) - toDays(b.end));
   return { rows, lanes };
 }
+/* ---------- summary style (Charlie): umbrella rows, possessions, gate lines, a phase band and zones ----------
+   Rather than one bar per WBS node (which is what P6 already draws), each area of work becomes one bold umbrella
+   bar with its stages chained underneath, possession-dependent work shows as tiles on its row, possessions get
+   their own lane at the top, and the key dates become full-height gates and a phase band. */
+const p6Short = s => {   // WBS names typed in capitals read as shouting: sentence case, keeping short acronyms
+  s = String(s || "").replace(/\s+/g, " ").trim();
+  if (/[a-z]/.test(s) || !/[A-Z]{4}/.test(s)) return s;
+  const t = s.toLowerCase().replace(/\b[a-z]{2,3}\b/g, (w, i) => (s.substr(i, w.length).match(/^[A-Z]{2,3}$/) && !/^(ALL|AND|THE|FOR|OF|TO|IN|ON|BY)$/.test(s.substr(i, w.length)) ? w.toUpperCase() : w));
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+const p6LaneName = s => { s = p6Short(s); const head = s.split(/\s+[-–\/]\s*|-\s+/)[0].trim(); return head.length >= 5 && head.length < s.length ? head : s; };
+// stage families, checked in this order (the first that matches an activity's name wins)
+const STAGE_FAMILIES = [
+  ["Demolition", /demol|\bdemo\b|strip.?out|remov/i], ["Preparation", /safety screen|temporary|hoarding|fenc|site prep|establish|set.?out|survey/i],
+  ["T&C", /test|commission|energis/i], ["Canopy", /canopy|roof/i],
+  ["Piling", /\bpil(e|es|ing)\b/i], ["Foundations", /foundation|footing|pile cap|excavat|earthwork/i],
+  ["Services", /building services|electrical|hydraul|containment|cabling|first fix|second fix|third fix|comms room|fire services|mechanical/i],
+  ["Fit-out & finishes", /fit.?out|finish|tactile|paint|furniture|signage|lighting|clad|screen|ticket/i],
+  ["Landscaping", /landscap|turf|planting|paving/i],
+  ["Structure", /struct|precast|steel|frame|slab|wall|pour|deck|girder|beam|column|stair|lift|platform|coping|edge/i],
+];
+const DESIGN_FAMILIES = [["Concept", /concept|30\s*%|preliminary|prelim/i], ["Detailed design", /detail|70\s*%|95\s*%|develop/i], ["Review", /review|permission|approv|comment|independent/i], ["IFC", /\bifc\b|for construction|100\s*%|\bafc\b/i]];
+const FACE_ORDER = ["Southern", "Northern", "Eastern", "Western"], FACE_RE = /\b(southern|northern|eastern|western)\b/i;
+const p6Under = (w, k) => { for (let x = w; x; x = x.parent) if (x === k) return true; return false; };
+const p6IsDesign = w => { for (let x = w; x; x = x.parent) if (P6_NAMES.design.test(x.name)) return true; return false; };
+function p6Span(ts) {   // a robust date range: the 10th-percentile start (one stray early activity doesn't stretch it), the last finish
+  const s = ts.map(t => t.start).sort(), e = ts.map(t => t.end).sort();
+  return { s: s[Math.min(s.length - 1, Math.floor(s.length * (s.length > 6 ? .2 : 0)))], e: e[e.length - 1], n: ts.length };
+}
+/* stages as a sequence: where two overlap, the earlier one hands over when the next starts */
+function chainStages(groups) {
+  groups = groups.filter(g => g && g.s && g.e).sort((a, b) => a.s < b.s ? -1 : a.s > b.s ? 1 : a.e < b.e ? -1 : 1);
+  const out = [];
+  for (const g0 of groups) {
+    const g = { ...g0 }, prev = out[out.length - 1];
+    if (prev && toDays(g.s) <= toDays(prev.e)) { if (toDays(g.s) > toDays(prev.s)) prev.e = addDays(g.s, -1); else g.s = addDays(prev.e, 1); }
+    if (toDays(g.s) > toDays(g.e)) continue;   // swallowed by the stage before it
+    out.push(g);
+  }
+  return out;
+}
+function p6Stages(M, w, acts, how, design) {
+  if (how === "wbs") {
+    const g = w.kids.map(k => { const ks = acts.filter(t => p6Under(t.wbs, k)); return ks.length ? { name: p6Short(k.name).replace(FACE_RE, "").trim(), key: k.code, ...p6Span(ks) } : null; });
+    return chainStages(g);
+  }
+  const fam = design ? DESIGN_FAMILIES : STAGE_FAMILIES, by = new Map();
+  for (const t of acts) { const nm = t.name.replace(/\[[^\]]*\]|\([^)]*\)/g, " "), f = fam.find(([, re]) => re.test(nm)); if (f) (by.get(f[0]) || by.set(f[0], []).get(f[0])).push(t); }
+  return chainStages([...by].map(([name, ts]) => ({ name, key: name, ...p6Span(ts) })));
+}
+/* sub-WBS stages when the parts are separate pieces of work; keywords when one part holds most of it */
+function p6StageMode(M, w) {
+  if (p6IsDesign(w)) return "keywords";
+  const kids = w.kids.filter(k => p6Roll(M, k).work.length), total = p6Roll(M, w).work.length;
+  return kids.length >= 2 && kids.every(k => p6Roll(M, k).work.length <= total * .6) ? "wbs" : "keywords";
+}
+const p6UStyle = (w, design) => design ? "U_DESIGN"
+  : /utilit|\bpup\b|relocat|enabling|site est|investigat/i.test(w.name + " " + (w.parent ? w.parent.name : "")) ? "U_UTILITY"
+  : /concourse|building|entrance|footbridge|bridge|corridor|precinct|structure/i.test(w.name) ? "U_BUILDING" : "U_CONSTRUCT";
+function p6Faces(acts) {
+  const c = {}; acts.forEach(t => { const m = t.name.match(FACE_RE); if (m) { const f = m[1][0].toUpperCase() + m[1].slice(1).toLowerCase(); c[f] = (c[f] || 0) + 1; } });
+  const fs = Object.entries(c).filter(([, n]) => n >= Math.max(3, acts.length * .08)).map(([f]) => f);
+  return fs.length >= 2 ? FACE_ORDER.filter(f => fs.includes(f)) : [];
+}
+/* possession-dependent work, and the access it needs: from a SCAS / possession type code, or a [SCAS] / [Nights] note in its name */
+function p6PossType(t) {
+  const code = Object.entries(t.codes || {}).find(([k]) => /scas|possession/i.test(k) && /type/i.test(k));
+  const note = (t.name.match(/\[([^\]]*)\]/) || [])[1] || "";
+  if (!code && !/scas|night|possession|shutdown/i.test(note)) return null;
+  const s = `${code ? code[1] : ""} ${note}`;
+  return /^\s*nights?\b|\bnight scas\b/i.test(note) || /^night/i.test(code ? code[1] : "") ? "POS_NIGHT" : /ext/i.test(s) ? "POS_EXT" : /addit/i.test(s) ? "POS_ADD" : "POS_WE";
+}
+/* a short caption for a possession tile: "Existing Platform 4 Temporary Safety Screen Installation [Nights]" → "Safety Screen" */
+function p6Caption(name) {
+  let s = String(name).replace(/\[[^\]]*\]/g, "").replace(/\([^)]*\)/g, "");
+  s = s.replace(/\b(install(ation)?|existing|temporary|new|construct(ion)?|platform\s*\d+(\s*[&/]\s*\d+)?|southern|northern|eastern|western|works?)\b/gi, "");
+  s = s.replace(/\s+/g, " ").replace(/^[\s\-–:,&]+|[\s\-–:,&]+$/g, "");
+  const w = s.split(" ").filter(Boolean);
+  return (w.length > 3 ? w.slice(0, 3).join(" ") : s) || String(name).slice(0, 18);
+}
+/* key dates: which become a full-height gate line, which a milestone, and which are left out */
+function p6DateRole(t) {
+  if (/notice|readiness|\bkim\b|\bcim\b|\bim \d|follow|commenc|\bafter\b|\bprior\b/i.test(t.name)) return "hide";
+  // the event itself (a name ending in "closure"), not work that follows it ("…commencement following station closure")
+  if (/closure\s*$|ready (for operations|to open)\s*$|re-?open(ing)?\s*$|testing (&|and) commissioning complete\s*$|cut-?over complete\b/i.test(t.name.split(/\s*->\s*/)[0])) return "gate";
+  if (/contract award|^(practical completion: )?date for practical completion/i.test(t.name)) return "ms";
+  return "hide";
+}
+const p6GateName = name => { let s = String(name).split(/\s*->\s*/)[0].replace(/^(existing|new)\s+/i, ""); const parts = s.split(/\s+-\s+/); if (parts.length > 1 && parts[parts.length - 1].split(" ").length >= 2) s = parts[parts.length - 1]; return s.trim(); };
+/* What the summary style suggests for a project: possessions and key dates from the management WBS, design by
+   discipline, and construction areas as umbrellas (an area too big to read as one row is opened up into its parts). */
+function p6SuggestSummary(M) {
+  const rec = { "~style": "summary" }, work = w => p6Roll(M, w).work.length;
+  const fits = (w, limit) => { const kids = w.kids.filter(work); return work(w) <= limit || !kids.length || (kids.length >= 6 && work(w) / kids.length <= 20); };
+  const POSS = /scas|possession|corridor access|shutdown|track closure/i;
+  const pick = (w, limit, laneHere) => {
+    rec[w.path] = laneHere ? "lane" : "split";
+    for (const k of w.kids) {
+      if (!work(k)) { rec[k.path] = "hide"; continue; }
+      if (P6_NAMES.ms.test(k.name)) { rec[k.path] = "hide"; continue; }   // milestones come in through the key dates
+      if (fits(k, limit)) rec[k.path] = "umbrella"; else pick(k, limit, laneHere);
+    }
+  };
+  for (const w of M.top.kids) {
+    if (!p6Roll(M, w).inc.length) { rec[w.path] = "hide"; continue; }
+    if (P6_NAMES.design.test(w.name)) {   // design: one umbrella per discipline (its packages are detail, not rows of their own)
+      const dpick = x => x.kids.forEach(k => {
+        if (!work(k) || P6_NAMES.ms.test(k.name)) { rec[k.path] = "hide"; return; }
+        if (k.depth >= 3 || fits(k, 400)) rec[k.path] = "umbrella"; else { rec[k.path] = "split"; dpick(k); }
+      });
+      rec[w.path] = "lane"; dpick(w);
+    }
+    else if (P6_NAMES.build.test(w.name)) pick(w, 150, true);
+    else {
+      rec[w.path] = "split";
+      const walk = (x, d) => x.kids.forEach(k => {
+        if (POSS.test(k.name) && work(k)) rec[k.path] = "possess";
+        else if (P6_NAMES.ms.test(k.name)) rec[k.path] = "ms";
+        else if (d < 2 && k.kids.length) { rec[k.path] = "split"; walk(k, d + 1); }
+        else rec[k.path] = "hide";
+      });
+      walk(w, 1);
+    }
+  }
+  return rec;
+}
+/* the summary as rows (with lanes) for projectFromRows / the update preview; x = extra fields for the item */
+function p6BuildSummary(M, rec) {
+  const rows = [], lanes = [], laneOf = new Map(), cursor = new Map(), mode = w => rec[w.path] || "hide";
+  const addLane = (key, name, nameAsIs) => {
+    if (!laneOf.has(key)) {
+      let nm = nameAsIs ? name : p6LaneName(name); if (lanes.some(l => l.name === nm)) nm = p6Short(name);
+      const l = { name: nm, key }; laneOf.set(key, l); lanes.push(l); cursor.set(l, 0);
+    }
+    return laneOf.get(key);
+  };
+  const occ = new Map(), occOf = l => occ.get(l) || occ.set(l, []).get(l);
+  const take = (l, n) => { const a = occOf(l), r = a.length; for (let k = 0; k < n; k++) a.push(Infinity); cursor.set(l, a.length); return r; };
+  // the first rows free from day s for h rows (the umbrella title reaches past a short bar, so the window is widened for it)
+  const place = (l, h, s, e) => {
+    const a = occOf(l); let top = 0;
+    while (!a.slice(top, top + h).every(f => f < s)) top++;
+    for (let k = 0; k < h; k++) a[top + k] = Math.max(a[top + k] ?? -Infinity, e);
+    cursor.set(l, a.length); return top;
+  };
+  const dayPx = () => 1450 / Math.max(30, toDays(pEnd) - toDays(pStart));   // about what an A3 sheet gives
+  const crit = ts => ts.some(t => !t.done && (t.driving || (t.tf != null && t.tf <= 0)));
+  const all = M.tasks.filter(t => M.includeAll || !M.out.has(t)), workAll = all.filter(t => !t.ms);
+  const pStart = workAll.reduce((m, t) => t.start < m ? t.start : m, "9999"), pEnd = all.reduce((m, t) => t.end > m ? t.end : m, "0000");
+  // 1. possessions: their own lane at the top, numbered by kind
+  const poss = M.nodes.filter(w => mode(w) === "possess").flatMap(w => p6Roll(M, w).work).sort((a, b) => a.start < b.start ? -1 : 1);
+  if (poss.length) {
+    const L = addLane("~poss", "SCAS Schedule", true), n = {}, rowsUsed = [];
+    for (const t of poss) {
+      const kind = /night/i.test(t.name) ? "POS_NIGHT" : /extend/i.test(t.name) ? "POS_EXT" : /addit/i.test(t.name) ? "POS_ADD" : "POS_WE";
+      n[kind] = (n[kind] || 0) + 1;
+      const label = kind === "POS_NIGHT" ? "Nights" : kind === "POS_EXT" ? `eSCAS ${n[kind]}` : kind === "POS_ADD" ? `aSCAS ${n[kind]}` : `SCAS ${n[kind]}`;
+      let r = rowsUsed.findIndex(e => e < toDays(t.start)); if (r < 0) { r = rowsUsed.length; rowsUsed.push(0); }
+      rowsUsed[r] = toDays(t.end) + 2;
+      rows.push({ id: t.code, name: label, style: kind, lane: L.name, start: t.start, end: t.end, status: "Active", row: r, y: NaN, fill: /contingen/i.test(t.name) ? "#FBE59A" : "", stroke: "", labelMode: "upright", x: { note: t.name } });
+    }
+    take(L, rowsUsed.length || 1);
+  }
+  // 2. key dates: milestones, gate lines and the phase band
+  const keyMs = [...new Map(M.nodes.filter(w => mode(w) === "ms").flatMap(w => p6Roll(M, w).ms).map(t => [t.code, t])).values()].sort((a, b) => a.start < b.start ? -1 : 1);
+  const roles = rec["~dates"] || {}, role = t => roles[t.code] || p6DateRole(t);
+  const asMs = keyMs.filter(t => role(t) === "ms");
+  if (asMs.length) {
+    const L = addLane("~key", "Key Dates", true);
+    asMs.forEach(t => rows.push({ id: t.code, name: t.name.replace(/^practical completion:\s*/i, ""), style: /contract award|date for/i.test(t.name) ? "ML_Diamond" : "ML_Square", lane: L.name, start: t.start, end: t.start, status: t.done ? "Complete" : "Active", row: NaN, y: NaN, fill: "", stroke: "", p6: { crit: crit([t]), tf: t.tf } }));
+    take(L, 1);
+  }
+  const gates = keyMs.filter(t => role(t) === "gate");
+  gates.forEach(t => rows.push({ id: "GATE " + t.code, name: p6GateName(t.name), style: "GATE", lane: "", start: t.start, end: t.start, status: "Active", row: 0, y: NaN, fill: "", stroke: "" }));
+  const band = rec["~band"] || {};
+  const closeT = keyMs.find(t => t.code === band.from) || (band.from === undefined ? gates.find(t => /closure|closed|shutdown/i.test(t.name)) : null);
+  const openT = keyMs.find(t => t.code === band.to) || (band.to === undefined ? gates.find(t => /ready|re-?open|open/i.test(t.name) && closeT && t.start > closeT.start) : null);
+  if (band.on !== false && closeT && openT && openT.start > closeT.start) {
+    const subj = /station/i.test(closeT.name + openT.name) ? "Station " : "", months = Math.round((toDays(openT.start) - toDays(closeT.start)) / 30.44);
+    const B = (id, name, style, s, e) => { if (toDays(e) >= toDays(s)) rows.push({ id, name, style, lane: "", start: s, end: e, status: "Active", row: 0, y: NaN, fill: "", stroke: "" }); };
+    B("BAND 1", `${subj}Open`, "BAND_OPEN", pStart < closeT.start ? pStart : closeT.start, addDays(closeT.start, -1));
+    B("BAND 2", `${subj}Closed (${months} months)`, "BAND_CLOSED", closeT.start, addDays(openT.start, -1));
+    B("BAND 3", `${subj}Open`, "BAND_OPEN", openT.start, pEnd > openT.start ? pEnd : openT.start);
+  }
+  // contingency at the end of the job, and the run after practical completion, as zones
+  if (rec["~cont"] !== false) {
+    const cont = M.nodes.filter(w => mode(w) === "ms").flatMap(w => p6Roll(M, w).work).filter(t => /contingen/i.test(t.name)).sort((a, b) => a.start < b.start ? -1 : 1);
+    const groups = []; for (const t of cont) { const g = groups[groups.length - 1]; if (g && toDays(t.start) - toDays(g.e) <= 10) { g.e = t.end > g.e ? t.end : g.e; g.ts.push(t); } else groups.push({ s: t.start, e: t.end, ts: [t] }); }
+    const last = groups[groups.length - 1];
+    if (last) {
+      const sub = [...new Set(last.ts.map(t => /weather|inclement/i.test(t.name) ? "Inclement Weather" : /construction risk/i.test(t.name) ? "Construction Risk" : p6Short(t.name.replace(/.*contingency\s*(allowance)?\s*(for)?\s*/i, ""))))].join(" + ");
+      rows.push({ id: "ZONE CONT", name: "Contingency", style: "ZONE_CONT", lane: "", start: last.s, end: last.e, status: "Active", row: 0, y: NaN, fill: "", stroke: "", x: { sub } });
+    }
+  }
+  if (rec["~pc"] !== false) {
+    const pc = [...keyMs].reverse().find(t => /date for practical completion/i.test(t.name)) || [...keyMs].reverse().find(t => /practical completion/i.test(t.name));
+    if (pc && pEnd > pc.start) rows.push({ id: "ZONE PC", name: "Practical Completion", style: "ZONE_PC", lane: "", start: addDays(pc.start, 1), end: pEnd, status: "Active", row: 0, y: NaN, fill: "", stroke: "" });
+  }
+  // 3. the work: lanes, umbrellas (with their stages and possession tiles), plain bars and zones, in WBS order
+  const tilesDone = new Set();
+  const umbrella = (w, lane) => {
+    const design = p6IsDesign(w), acts = p6Roll(M, w).work;
+    if (!acts.length) return;
+    const faces = (rec["~split"] || {})[w.path] === false ? [] : p6Faces(acts);
+    const how = (rec["~stages"] || {})[w.path] || p6StageMode(M, w);
+    if (faces.length >= 2 || !lane) lane = addLane(w.path, w.name);   // an area split by face gets a lane of its own
+    const groups = faces.length >= 2 ? faces.map(f => ({ face: f, acts: acts.filter(t => { const m = t.name.match(FACE_RE); return !m || m[1].toLowerCase() === f.toLowerCase(); }) })) : [{ face: "", acts }];
+    for (const g of groups) {
+      const id = "WBS " + w.path + (g.face ? " " + g.face[0] : "");
+      let stages = p6Stages(M, w, g.acts, how, design);
+      if (stages.length < 2 && how === "keywords") stages = p6Stages(M, w, g.acts, "wbs", design);
+      const sp = p6Span(g.acts), s = stages.length ? stages[0].s : sp.s, e = stages.length ? stages.reduce((m, x) => x.e > m ? x.e : m, sp.e) : sp.e;
+      const name = (g.face ? g.face + " " : "") + p6Short(w.name).replace(/^(southern|northern|eastern|western)\s+/i, "");
+      const tiles = rec["~tiles"] !== false && g.acts.some(t => !tilesDone.has(t.code) && p6PossType(t));
+      const half = Math.max(0, (textW(name, 9, 700) + 24) / dayPx() - (toDays(e) - toDays(s))) / 2;
+      const top = place(lane, tiles ? 3 : 2, toDays(s) - half - 14, toDays(e) + half + 14);
+      rows.push({ id, name, style: p6UStyle(w, design), lane: lane.name, start: s, end: e, status: "Active", row: top, y: NaN, fill: "", stroke: "", p6: { crit: crit(g.acts) } });
+      stages.forEach(st => rows.push({ id: `${id} · ${st.key}`, name: st.name, style: "BAR", lane: lane.name, start: st.s, end: st.e, status: "Active", row: top + 1, y: NaN, fill: "", stroke: "", parent: id }));
+      if (rec["~tiles"] !== false) g.acts.filter(t => !tilesDone.has(t.code) && p6PossType(t)).forEach(t => {
+        tilesDone.add(t.code);
+        rows.push({ id: t.code, name: p6Caption(t.name), style: p6PossType(t), lane: lane.name, start: t.start, end: t.end, status: "Active", row: top + 1, y: NaN, fill: "", stroke: "", parent: id, labelMode: "below", x: { note: t.name } });
+      });
+    }
+  };
+  const visit = (w, lane) => {
+    const m = mode(w), r = p6Roll(M, w);
+    if (m === "hide" || m === "possess" || m === "ms" || !r.inc.length) return;
+    if (m === "lane") lane = addLane(w.path, w.name);
+    if (m === "zone") {
+      const style = /assur|safety|gate \d/i.test(w.name) ? "ZONE_ASSURE" : "ZONE_TC";
+      if (r.s) rows.push({ id: "ZONE " + w.path, name: p6Short(w.name), style, lane: "", start: r.s, end: r.e, status: "Active", row: 0, y: NaN, fill: "", stroke: "" });
+      return;
+    }
+    if (m === "bar") {
+      lane = lane || addLane(w.path.split(".")[0], (M.top.kids.find(k => k.path === w.path.split(".")[0]) || w).name);
+      rows.push({ id: "WBS " + w.path, name: p6Short(w.name), style: "BAR", lane: lane.name, start: r.s, end: r.e, status: "Active", row: take(lane, 1), y: NaN, fill: "", stroke: "", p6: { crit: crit(r.inc) } });
+      return;
+    }
+    if (m === "umbrella") return umbrella(w, lane);
+    w.kids.forEach(k => visit(k, lane));
+  };
+  M.top.kids.forEach(w => visit(w, null));
+  return { rows, lanes: lanes.filter(l => cursor.get(l) > 0 || rows.some(r => r.lane === l.name)), keyMs, role };
+}
+/* A whole programme from an XER and the choices made (used by Build and by the live preview). */
+function p6MakeProject(M, rec, fname) {
+  const summary = rec["~style"] === "summary";
+  const { rows, lanes } = summary ? p6BuildSummary(M, rec) : p6Build(M, rec);
+  const base = blankProject();
+  const scen = p6Scenario(fname);
+  Object.assign(base.meta, { program: (M.title || "").toUpperCase(), number: (M.code || base.meta.number).replace(/-[A-Z]{1,3}$/, ""), title: scen || "Summary", subtitle: summary ? "Summary program" : "Summary program" });
+  if (summary) { ensureSummaryStyles(base); Object.assign(base.page, { font: "condensed", header: "bold", rowH: rows.length > 150 ? 15 : 17 }); }   // a big job packs tighter to stay on one A3
+  else base.page.rowH = rows.length > 40 ? 18 : 22;   // P6 summaries are dense: start compact
+  if (!rows.length) return { p: null, rows, lanes };
+  // whole months around everything, and the scale the sheet will print at, so rows are packed for real label widths
+  const s = Math.min(...rows.map(r => toDays(r.start))), e = Math.max(...rows.map(r => toDays(r.end)));
+  const d0 = new Date(s * DAY), d1 = new Date(e * DAY);
+  base.timeline = { start: fromDays(Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), 1) / DAY), end: fromDays(Date.UTC(d1.getUTCFullYear(), d1.getUTCMonth() + 1, 0) / DAY) };
+  const [pw, ph] = PAPER[base.page.size] || PAPER.A3, wmm = (base.page.orient === "portrait" ? Math.min(pw, ph) : Math.max(pw, ph)) - 2 * base.page.margin;
+  PPD_HINT = (wmm * PX_PER_MM - G.headW) / (toDays(base.timeline.end) - toDays(base.timeline.start) + 1);
+  let p; try { p = projectFromRows(rows, lanes, base); } finally { PPD_HINT = null; }
+  const byRow = new Map(rows.map(r => [r.id, r]));
+  p.items.forEach(i => {
+    const r = byRow.get(i.id); if (!r) return;
+    if (r.p6) { if (r.p6.crit) i.p6crit = true; if (r.p6.tf != null) i.p6tf = r.p6.tf; }
+    if (r.x) Object.assign(i, r.x);
+    if (r.labelMode && r.labelMode !== "auto") i.labelMode = r.labelMode;
+  });
+  if (summary) syncContainers(p, { noPush: true });
+  return { p, rows, lanes };
+}
+/* the sheet the choices make, drawn small (the real drawing code, on a stand-in programme) */
+function p6PreviewSvg(project, width) {
+  const real = P, realSel = sel, realMulti = MULTI;
+  const svg = document.createElementNS(NS, "svg");
+  try {
+    P = project; sel = null; MULTI = new Set(); applySpacing();
+    const days = toDays(P.timeline.end) - toDays(P.timeline.start) + 1;
+    draw(svg, { ppd: Math.max(.5, (Math.max(900, width * 1.6) - G.headW) / days), print: true });
+  } finally { P = real; sel = realSel; MULTI = realMulti; applySpacing(); }
+  svg.removeAttribute("width"); svg.removeAttribute("height"); svg.style.width = "100%"; svg.style.height = "auto"; svg.style.display = "block";
+  return svg;
+}
+
 /* entry point: a new programme from an XER, or an update of this one (mode "update") */
 async function importP6(file, mode) {
   const M = p6Model(parseXer(await readXerText(file)));
@@ -3708,16 +4222,24 @@ async function importP6(file, mode) {
   if (mode === "update" && P.p6 && P.p6.code && M.code && P.p6.code !== M.code)
     toast(`Note: this programme was built from ${P.p6.code}; the file is ${M.code}.`, 6000);
   M.includeAll = !!(saved && P.p6.includeAll);
-  openP6Builder(M, { ...p6Suggest(M), ...(saved || {}) }, file.name, mode);
+  const style = saved ? saved["~style"] || "detailed" : "summary";   // Charlie starts new imports in the summary style
+  const rec = style === "summary" ? { ...p6SuggestSummary(M), ...(saved || {}) } : { ...p6Suggest(M), ...(saved || {}), "~style": "detailed" };
+  openP6Builder(M, rec, file.name, mode);
 }
 /* the scenario named in the file: "P26-8287 RESOURCE HEAVY.xer" → "Resource Heavy" */
 const p6Scenario = fname => fname.replace(/\.xer$/i, "").replace(/^[A-Z]{0,4}-?\d[\w-]*\s+/i, "").trim().toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+const P6_MODES_SUMMARY = [["lane", "Lane (parts below)"], ["umbrella", "Umbrella row"], ["split", "Look inside"], ["possess", "Possession lane"], ["ms", "Key dates"], ["zone", "Zone (large label)"], ["bar", "One bar"], ["hide", "Leave out"]];
 function openP6Builder(M, rec, fname, mode) {
   const update = mode === "update";
   const otherScenario = update && p6Scenario(fname) && p6Scenario(fname).toLowerCase() !== String(P.meta.title || "").toLowerCase();
-  const m = showModal(`<header><h3>${update ? "Update from" : "Summary from"} P6: ${esc(fname)}</h3>
-      <p>${esc(M.title)}${M.code ? ` (${esc(M.code)})` : ""} · data date ${M.dataDate ? fmt(M.dataDate) : "not set"} · ${M.tasks.length} activities. Choose what each part of the WBS shows on the PoaP. ${update ? "These are the choices used last time; new WBS parts have a suggestion." : "This is a suggestion to start from."}</p></header>
-    <div class="body p6b"><div class="p6tree" id="p6Tree"></div><div class="p6sum" id="p6Sum"></div></div>
+  const summary = () => rec["~style"] === "summary";
+  const m = showModal(`<header class="p6head"><div><h3>${update ? "Update from" : "Summary from"} P6: ${esc(fname)}</h3>
+      <p>${esc(M.title)}${M.code ? ` (${esc(M.code)})` : ""} · data date ${M.dataDate ? fmt(M.dataDate) : "not set"} · ${M.tasks.length} activities. ${update ? "These are the choices used last time; new WBS parts have a suggestion." : "This is a suggestion to start from: change anything and the preview follows."}</p></div>
+      <div class="seg p6style" role="group" aria-label="Style"><button type="button" data-style="summary">Summary</button><button type="button" data-style="detailed">Detailed (WBS bars)</button></div></header>
+    <div class="body p6body">
+      <div class="p6prev" id="p6Prev" title="Click to make the preview larger or smaller"><p class="note">Drawing the preview…</p></div>
+      <div class="p6b"><div class="p6tree" id="p6Tree"></div><div class="p6sum" id="p6Sum"></div></div>
+    </div>
     <footer>
       <button class="btn" id="p6Reset" title="Back to the suggestion from the WBS">Suggest again</button>
       ${update ? `<label class="check" title="Show this programme's current dates as a narrow grey baseline under the updated bars"><input type="checkbox" id="p6Keep" ${otherScenario ? "checked" : ""}> Show the current dates as the baseline</label>
@@ -3725,32 +4247,23 @@ function openP6Builder(M, rec, fname, mode) {
       <span class="spacer" style="flex:1"></span><button class="btn" data-act="close">Cancel</button>
       <button class="btn primary" data-act="go">${update ? "Review the changes" : "Build the summary"}</button></footer>`, {
     go: () => {
-      const { rows, lanes } = p6Build(M, rec);
-      if (!rows.length) { toast("Nothing is selected to show. Set some WBS parts to a lane, bar or milestones."); return false; }
-      const recipe = Object.fromEntries(Object.entries(rec).filter(([k]) => M.nodes.some(w => w.path === k)));
+      const recipe = Object.fromEntries(Object.entries(rec).filter(([k]) => k.startsWith("~") || M.nodes.some(w => w.path === k)));
       const p6 = { recipe, code: M.code, title: M.title, source: fname, imported: todayISO(), includeAll: !!M.includeAll };
       const anyProgress = M.tasks.some(t => t.actual);
       const dataDate = anyProgress && M.dataDate ? addDays(M.dataDate, -1) : "";   // P6's data date is the start of the day; ours is the end
       if (!update) {
-        const base = blankProject();
-        // the scenario usually names the file ("P26-8287 BASE CASE.xer" → "Base Case"); the project's full name goes on top
-        const scen = p6Scenario(fname);
-        Object.assign(base.meta, { program: (M.title || "").toUpperCase(), number: (M.code || base.meta.number).replace(/-[A-Z]{1,3}$/, ""), title: scen || "Summary", subtitle: "Summary program" });
-        base.page.rowH = rows.length > 40 ? 18 : 22;   // P6 summaries are dense: start compact
-        // whole months around everything, and the scale the sheet will print at, so rows are packed for real label widths
-        const s = Math.min(...rows.map(r => toDays(r.start))), e = Math.max(...rows.map(r => toDays(r.end)));
-        const d0 = new Date(s * DAY), d1 = new Date(e * DAY);
-        base.timeline = { start: fromDays(Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), 1) / DAY), end: fromDays(Date.UTC(d1.getUTCFullYear(), d1.getUTCMonth() + 1, 0) / DAY) };
-        const [pw, ph] = PAPER[base.page.size] || PAPER.A3, wmm = (base.page.orient === "portrait" ? Math.min(pw, ph) : Math.max(pw, ph)) - 2 * base.page.margin;
-        PPD_HINT = (wmm * PX_PER_MM - G.headW) / (toDays(base.timeline.end) - toDays(base.timeline.start) + 1);
-        let p; try { p = projectFromRows(rows, lanes, base); } finally { PPD_HINT = null; }
-        const extra = new Map(rows.map(r => [r.id, r.p6]));
-        p.items.forEach(i => { const x = extra.get(i.id); if (x) { if (x.crit) i.p6crit = true; if (x.tf != null) i.p6tf = x.tf; } });
+        const { p, rows, lanes } = p6MakeProject(M, rec, fname);
+        if (!p) { toast("Nothing is selected to show. Set some WBS parts to a lane, umbrella, bar or key dates."); return false; }
         p.p6 = p6;
         if (dataDate) p.progress = { dataDate };
         startNew(p);
         toast(`Built ${rows.length} items in ${lanes.length} lanes from ${M.tasks.length} activities. Choose where to save it.`, 6000);
       } else {
+        const built = summary() ? p6BuildSummary(M, rec) : p6Build(M, rec), rows = built.rows, lanes = built.lanes;
+        if (!rows.length) { toast("Nothing is selected to show."); return false; }
+        if (summary()) ensureSummaryStyles(P);
+        // existing items keep the row they have on the sheet; new ones go where the summary puts them
+        rows.forEach(r => { if (P.items.some(i => i.id === r.id)) r.row = NaN; });
         const keep = m.querySelector("#p6Keep")?.checked, sep = m.querySelector("#p6Sep")?.checked;
         const before = P.meta.title || ((P.p6 && P.p6.source) || "Previous").replace(/\.xer$/i, "");
         // nothing changes until the update is applied: then the baseline, the new scenario name and the new file
@@ -3765,41 +4278,93 @@ function openP6Builder(M, rec, fname, mode) {
       }
     },
   });
-  m.querySelector(".dlg").classList.add("wide");
-  const tree = m.querySelector("#p6Tree"), sum = m.querySelector("#p6Sum");
+  m.querySelector(".dlg").classList.add("wide", "p6dlg");
+  const tree = m.querySelector("#p6Tree"), sum = m.querySelector("#p6Sum"), prev = m.querySelector("#p6Prev");
   const open = new Set(M.top.kids.map(w => w.path));   // expanded nodes
   const showKids = w => ["lane", "split"].includes(rec[w.path] || "hide");
+  let prevTimer = 0;
+  const drawPreview = () => {
+    clearTimeout(prevTimer);
+    prevTimer = setTimeout(() => {
+      if (!prev.isConnected) return;
+      try {
+        const { p } = p6MakeProject(M, rec, fname);
+        prev.innerHTML = "";
+        if (!p) { prev.innerHTML = `<p class="note">Nothing selected yet.</p>`; return; }
+        prev.appendChild(p6PreviewSvg(p, prev.clientWidth || 1000));
+      } catch (err) { console.error(err); prev.innerHTML = `<p class="note">The preview couldn't be drawn: ${esc(err.message)}</p>`; }
+    }, 120);
+  };
+  prev.onclick = () => prev.classList.toggle("big");
   const paint = () => {
+    m.querySelectorAll("[data-style]").forEach(b => b.setAttribute("aria-pressed", (rec["~style"] || "detailed") === b.dataset.style));
+    const modes = summary() ? P6_MODES_SUMMARY : P6_MODES;
     const rows = [], scroll = tree.scrollTop;
     const add = w => {
       const r = p6Roll(M, w); if (!r.all.length) return;
       const md = rec[w.path] || "hide", kidsHere = w.kids.some(k => p6Roll(M, k).all.length);
+      const extra = summary() && md === "umbrella" ? (() => {
+        const how = (rec["~stages"] || {})[w.path] || p6StageMode(M, w), faces = p6Faces(r.work), split = (rec["~split"] || {})[w.path] !== false;
+        return `<span class="p6opts"><select data-stages="${esc(w.path)}" aria-label="Stages from"><option value="keywords" ${how === "keywords" ? "selected" : ""}>Stages by type of work</option><option value="wbs" ${how === "wbs" ? "selected" : ""}>Stages from its WBS</option></select>
+          ${faces.length >= 2 ? `<label class="check" title="One umbrella per side, in a lane of its own"><input type="checkbox" data-split="${esc(w.path)}" ${split ? "checked" : ""}> ${faces.join(" / ")}</label>` : ""}</span>`;
+      })() : "";
       rows.push(`<div class="p6row ${md === "hide" ? "off" : ""}" style="--d:${w.depth - 1}">
         <button type="button" class="p6tog" data-tog="${esc(w.path)}" ${kidsHere ? "" : "disabled"} aria-label="${open.has(w.path) ? "Collapse" : "Expand"}">${kidsHere ? (open.has(w.path) ? "▾" : "▸") : ""}</button>
-        <span class="p6name" title="${esc(w.path)} · ${esc(w.name)}"><span class="p6code">${esc(w.code)}</span> ${esc(w.name)}</span>
+        <span class="p6name" title="${esc(w.path)} · ${esc(w.name)}"><span class="p6code">${esc(w.code)}</span> ${esc(w.name)}${extra}</span>
         <span class="p6meta">${r.s ? `${fmt(r.s)} – ${fmt(r.e)}` : ""}<br>${r.work.length} act${r.ms.length ? ` · ${r.ms.length} ms` : ""}${r.left ? ` · <span class="warn" title="Unlinked activities at the data date, left out of the dates">${r.left} left out</span>` : ""}</span>
-        <select data-mode="${esc(w.path)}" aria-label="What ${esc(w.name)} shows">${P6_MODES.map(([v, n]) => `<option value="${v}" ${v === md ? "selected" : ""}>${n}</option>`).join("")}</select></div>`);
+        <select data-mode="${esc(w.path)}" aria-label="What ${esc(w.name)} shows">${modes.map(([v, n]) => `<option value="${v}" ${v === md ? "selected" : ""}>${n}</option>`).join("")}${modes.some(([v]) => v === md) ? "" : `<option value="${esc(md)}" selected>${esc(md)}</option>`}</select></div>`);
       if (open.has(w.path) && (showKids(w) || md === "hide")) w.kids.forEach(add);
     };
     M.top.kids.forEach(add);
     tree.innerHTML = rows.join(""); tree.scrollTop = scroll;
-    // what it will make
-    const { rows: items, lanes } = p6Build(M, rec);
-    const per = lanes.map(l => { const its = items.filter(i => i.lane === l.name); return `<li><b>${esc(l.name)}</b><span class="note">${[its.filter(i => i.style === "BAR").length && `${its.filter(i => i.style === "BAR").length} bars`, its.filter(i => /^ML_/.test(i.style)).length && `${its.filter(i => /^ML_/.test(i.style)).length} milestones`].filter(Boolean).join(", ")}</span></li>`; }).join("");
-    const curtains = items.filter(i => /^CUR_/.test(i.style)).length, critical = items.filter(i => i.p6 && i.p6.crit).length;
+    // what it will make, and (summary) the key dates
+    const built = summary() ? p6BuildSummary(M, rec) : p6Build(M, rec), items = built.rows, lanes = built.lanes;
+    const count = (its, test, w) => { const n = its.filter(test).length; return n ? `${n} ${w}${n > 1 ? "s" : ""}` : ""; };
+    const per = lanes.map(l => { const its = items.filter(i => i.lane === l.name);
+      return `<li><b>${esc(l.name)}</b><span class="note">${[count(its, i => /^U_/.test(i.style), "umbrella"), count(its, i => i.style === "BAR" && !i.parent, "bar"), count(its, i => i.style === "BAR" && i.parent, "stage"), count(its, i => /^POS_/.test(i.style), "possession"), count(its, i => /^ML_/.test(i.style), "milestone")].filter(Boolean).join(", ")}</span></li>`; }).join("");
     const left = M.includeAll ? 0 : M.out.size;
+    let dates = "";
+    if (summary() && built.keyMs.length) {
+      const roles = rec["~dates"] || {}, band = rec["~band"] || {};
+      const opt = (t, v, n) => `<option value="${v}" ${built.role(t) === v ? "selected" : ""}>${n}</option>`;
+      dates = `<h4>Key dates</h4>
+        <div class="p6dates">${built.keyMs.map(t => `<label><span title="${esc(t.name)}"><span class="p6code">${fmt(t.start)}</span> ${esc(t.name)}</span><select data-date="${esc(t.code)}">${opt(t, "gate", "Gate line")}${opt(t, "ms", "Milestone")}${opt(t, "hide", "Leave out")}</select></label>`).join("")}</div>
+        <label class="check"><input type="checkbox" id="p6Band" ${band.on !== false ? "checked" : ""}> Phase band from the closure gate to the reopening gate</label>
+        <label class="check"><input type="checkbox" id="p6Cont" ${rec["~cont"] !== false ? "checked" : ""}> Contingency zone at the end</label>
+        <label class="check"><input type="checkbox" id="p6Pc" ${rec["~pc"] !== false ? "checked" : ""}> Practical completion zone</label>
+        <label class="check"><input type="checkbox" id="p6Tiles" ${rec["~tiles"] !== false ? "checked" : ""}> Possession works as tiles on their rows</label>`;
+    }
     sum.innerHTML = `<h4>The PoaP will have</h4><ol class="p6lanes">${per || "<li class='note'>Nothing yet</li>"}</ol>
-      ${curtains ? `<p class="note">${curtains} contingency curtain${curtains > 1 ? "s" : ""}.</p>` : ""}
-      <p class="note">${items.length} items from ${M.tasks.length} activities. ${critical ? `${critical} on P6's critical or driving path (red outline).` : ""}</p>
-      ${M.out.size ? `<div class="p6warn"><b>${M.out.size} activities aren't linked into the programme.</b> They start at the data date with no predecessor (or only follow such activities), so they're ${M.includeAll ? "<b>included</b>" : "left out of the bar dates"}.
+      <p class="note">${items.length} items from ${M.tasks.length} activities.</p>
+      ${dates}
+      ${M.out.size ? `<div class="p6warn"><b>${M.out.size} activities aren't linked into the programme.</b> They start at the data date with no predecessor (or only follow such activities), so they're ${M.includeAll ? "<b>included</b>" : "left out of the dates"}.
         <label class="check"><input type="checkbox" id="p6All" ${M.includeAll ? "checked" : ""}> Include them anyway</label>
         <details><summary>Show them</summary><ul>${[...M.out].slice(0, 60).map(t => `<li><span class="p6code">${esc(t.code)}</span> ${esc(t.name)} <span class="note">${esc(t.wbs.path)}</span></li>`).join("")}${M.out.size > 60 ? `<li class="note">and ${M.out.size - 60} more</li>` : ""}</ul></details></div>` : ""}
       <p class="note">Your choices are saved with the programme, so the next XER (or another scenario) is summarised the same way.</p>`;
     const all = sum.querySelector("#p6All"); if (all) all.onchange = e => { M.includeAll = e.target.checked; M.roll.clear(); paint(); };
+    sum.querySelectorAll("[data-date]").forEach(s => s.onchange = () => { rec["~dates"] = { ...(rec["~dates"] || {}), [s.dataset.date]: s.value }; paint(); });
+    const flag = (id, key, set) => { const b = sum.querySelector(id); if (b) b.onchange = e => { set(e.target.checked); paint(); }; };
+    flag("#p6Band", "~band", v => rec["~band"] = { ...(rec["~band"] || {}), on: v });
+    flag("#p6Cont", "~cont", v => rec["~cont"] = v);
+    flag("#p6Pc", "~pc", v => rec["~pc"] = v);
+    flag("#p6Tiles", "~tiles", v => rec["~tiles"] = v);
+    drawPreview();
   };
-  tree.addEventListener("change", e => { const s = e.target.closest("[data-mode]"); if (!s) return; rec[s.dataset.mode] = s.value; if (["lane", "split"].includes(s.value)) open.add(s.dataset.mode); paint(); });
+  tree.addEventListener("change", e => {
+    const s = e.target.closest("[data-mode]"), st = e.target.closest("[data-stages]"), sp = e.target.closest("[data-split]");
+    if (s) { rec[s.dataset.mode] = s.value; if (["lane", "split"].includes(s.value)) open.add(s.dataset.mode); }
+    if (st) rec["~stages"] = { ...(rec["~stages"] || {}), [st.dataset.stages]: st.value };
+    if (sp) rec["~split"] = { ...(rec["~split"] || {}), [sp.dataset.split]: sp.checked };
+    paint();
+  });
   tree.addEventListener("click", e => { const b = e.target.closest("[data-tog]"); if (!b) return; const k = b.dataset.tog; open.has(k) ? open.delete(k) : open.add(k); paint(); });
-  m.querySelector("#p6Reset").onclick = () => { Object.keys(rec).forEach(k => delete rec[k]); Object.assign(rec, p6Suggest(M)); paint(); };
+  m.querySelectorAll("[data-style]").forEach(b => b.onclick = () => {
+    if ((rec["~style"] || "detailed") === b.dataset.style) return;
+    Object.keys(rec).forEach(k => delete rec[k]);
+    Object.assign(rec, b.dataset.style === "summary" ? p6SuggestSummary(M) : { ...p6Suggest(M), "~style": "detailed" });
+    paint();
+  });
+  m.querySelector("#p6Reset").onclick = () => { const style = rec["~style"]; Object.keys(rec).forEach(k => delete rec[k]); Object.assign(rec, style === "summary" ? p6SuggestSummary(M) : { ...p6Suggest(M), "~style": "detailed" }); paint(); };
   paint();
 }
 $("fXer").onchange = async e => {
@@ -3817,16 +4382,22 @@ const FONT_URLS = {
   normal: "https://cdn.jsdelivr.net/gh/JulietaUla/Montserrat@master/fonts/ttf/Montserrat-Medium.ttf",
   bold: "https://cdn.jsdelivr.net/gh/JulietaUla/Montserrat@master/fonts/ttf/Montserrat-Bold.ttf",
 };
-let fontCache = null;
-async function loadPdfFonts() {
-  if (fontCache !== null) return fontCache;
-  if (HOST && HOST.loadFonts) { try { fontCache = await HOST.loadFonts(); } catch (e) { fontCache = false; } return fontCache; }
+// the condensed summary face, embedded the same way
+const FONT_URLS_CONDENSED = {
+  normal: "https://cdn.jsdelivr.net/fontsource/fonts/roboto-condensed@latest/latin-500-normal.ttf",
+  bold: "https://cdn.jsdelivr.net/fontsource/fonts/roboto-condensed@latest/latin-700-normal.ttf",
+};
+const fontCaches = {};
+async function loadPdfFonts(face = "montserrat") {
+  if (fontCaches[face] !== undefined) return fontCaches[face];
+  if (face === "montserrat" && HOST && HOST.loadFonts) { try { fontCaches[face] = await HOST.loadFonts(); } catch (e) { fontCaches[face] = false; } return fontCaches[face]; }
+  const urls = face === "condensed" ? FONT_URLS_CONDENSED : FONT_URLS;
   const b64 = buf => { const u = new Uint8Array(buf); let s = ""; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); };
   try {
-    const [n, b] = await Promise.all([FONT_URLS.normal, FONT_URLS.bold].map(u => fetch(u).then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })));
-    fontCache = { normal: b64(n), bold: b64(b) };
-  } catch (e) { fontCache = false; }   // offline: fall back to Helvetica
-  return fontCache;
+    const [n, b] = await Promise.all([urls.normal, urls.bold].map(u => fetch(u).then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })));
+    fontCaches[face] = { normal: b64(n), bold: b64(b) };
+  } catch (e) { fontCaches[face] = false; }   // offline: fall back to Helvetica
+  return fontCaches[face];
 }
 async function exportPdf() {
   const btn = $("bPdf"); btn.disabled = true; btn.textContent = "Building PDF…";
@@ -3842,12 +4413,13 @@ async function buildPdfBlob() {
   const { jsPDF } = (HOST && HOST.jspdf) || window.jspdf;
   const { PW, PH } = paperMM();
   const doc = new jsPDF({ orientation: PW >= PH ? "landscape" : "portrait", unit: "mm", format: [PW, PH] });
-  const fonts = await loadPdfFonts();
+  const want = P.page.font === "condensed" ? "condensed" : "montserrat", fonts = await loadPdfFonts(want);
   let face = "helvetica";
   if (fonts) {
-    doc.addFileToVFS("Montserrat-Medium.ttf", fonts.normal); doc.addFont("Montserrat-Medium.ttf", "Montserrat", "normal");
-    doc.addFileToVFS("Montserrat-Bold.ttf", fonts.bold); doc.addFont("Montserrat-Bold.ttf", "Montserrat", "bold");
-    face = "Montserrat";
+    const fam = want === "condensed" ? "RobotoCondensed" : "Montserrat";
+    doc.addFileToVFS(fam + "-Medium.ttf", fonts.normal); doc.addFont(fam + "-Medium.ttf", fam, "normal");
+    doc.addFileToVFS(fam + "-Bold.ttf", fonts.bold); doc.addFont(fam + "-Bold.ttf", fam, "bold");
+    face = fam;
   }
   const holder = document.createElement("div"); holder.style.cssText = "position:fixed;left:-99999px;top:0";
   const svg = document.createElementNS(NS, "svg"); holder.appendChild(svg); ROOT.appendChild(holder);
@@ -4036,16 +4608,16 @@ async function reconnectFile(last) {
 const CHANNEL = (!HOST && window.POAP_CHANNEL) || null;   // from channel.js; inside SharePoint there's no beta
 function channelCard() {
   if (!CHANNEL || !CHANNEL.betaUrl) return "";
-  const beta = CHANNEL.channel === "beta";
+  const beta = CHANNEL.channel !== "stable", label = CHANNEL.channel === "charlie" ? "Charlie" : "the beta";
   return `<div class="chancard${beta ? " beta" : ""}">
-    <b>${beta ? `You're on the beta: ${esc(CHANNEL.title)}` : `A beta is available: ${esc(CHANNEL.title)}`}</b>
+    <b>${beta ? `You're on ${label}: ${esc(CHANNEL.title)}` : `A beta is available: ${esc(CHANNEL.title)}`}</b>
     <ul>${(CHANNEL.notes || []).map(n => `<li>${esc(n)}</li>`).join("")}</ul>
     <p class="note">Programmes kept in the browser stay with each version. To move one across, save it to a file and open it in the other.</p>
     <a class="btn" href="${esc(beta ? CHANNEL.stableUrl : CHANNEL.betaUrl)}">${beta ? "Back to the standard version" : "Open the beta"}</a>
   </div>`;
 }
-if (CHANNEL && CHANNEL.channel === "beta") {   // a small BETA tag by the name, back to the standard version
-  const tag = document.createElement("a"); tag.className = "betatag"; tag.href = CHANNEL.stableUrl; tag.textContent = "BETA"; tag.title = "You're on the beta. Click for the standard version.";
+if (CHANNEL && CHANNEL.channel !== "stable") {   // a small BETA / CHARLIE tag by the name, back to the standard version
+  const tag = document.createElement("a"); tag.className = "betatag"; tag.href = CHANNEL.stableUrl; tag.textContent = CHANNEL.channel.toUpperCase(); tag.title = `You're on ${CHANNEL.channel === "charlie" ? "Charlie" : "the beta"}. Click for the standard version.`;
   ROOT.querySelector(".brand b")?.after(tag);
 }
 

@@ -258,6 +258,26 @@ const TESTS = {
     const s = T.item("WBS C.B.1");
     T.eq([s.start, s.bStart, s.row, P.meta.title, DOC], ["2027-05-24", "2027-05-10", rowBefore, "Option B", null]);
   },
+  "P6 summary style: umbrellas, stages and zones": () => {
+    const M = p6Model(parseXer(T.xer())), rec = p6SuggestSummary(M), { rows, lanes } = p6BuildSummary(M, rec);
+    T.eq([rec["~style"], rec["M.K"], rec["C.A"], rec["C.B"]], ["summary", "ms", "umbrella", "umbrella"]);
+    T.eq(lanes.map(l => l.name), ["Key Dates", "Design", "Construction"]);
+    const r = id => rows.find(x => x.id === id);
+    T.eq([r("WBS C.A").style, r("WBS C.A").start, r("WBS C.A").end], ["U_CONSTRUCT", "2027-05-03", "2027-06-27"], "an area is one umbrella over its work");
+    T.eq(rows.filter(x => x.parent === "WBS C.A").map(x => [x.name, x.row]), [["Segment 1", 1], ["Segment 2", 1]], "its stages chained on the row under it");
+    T.eq(r("WBS C.B").row, 2, "an umbrella at the same time goes below, no caption row when it has no tiles");
+    T.eq([r("ZONE CONT").style, r("ZONE CONT").lane], ["ZONE_CONT", ""], "contingency becomes a zone");
+  },
+  "P6 summary style: the project, its preview, and three-line lane titles": () => {
+    const M = p6Model(parseXer(T.xer())), { p } = p6MakeProject(M, p6SuggestSummary(M), "T-100 OPTION A.xer");
+    T.eq([p.page.font, p.page.header], ["condensed", "bold"]);
+    T.ok(p.items.some(i => isUmbrella(p, i)), "umbrellas made");
+    const svg = p6PreviewSvg(p, 900);
+    T.ok(svg && /Portion A/.test(svg.textContent), "the preview draws the sheet");
+    loadDoc(p, null);
+    T.ok(document.querySelector("#chart") && /Portion B/.test(document.querySelector("#chart").textContent), "and so does Build");
+    T.eq(titleLines("Construction Main Works Rail Corridor", 0).length, 3, "a long lane name wraps to three lines");
+  },
   "Help opens with ? and lists the shortcuts": () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "?", bubbles: true }));
     const m = document.querySelector(".modal");
