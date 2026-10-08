@@ -85,9 +85,9 @@ button, input, select { font: inherit; color: inherit; }
 .p6dlg .p6tree, .p6dlg .p6sum { max-height: 40vh; }
 .p6opts { display: inline-flex; gap: 8px; align-items: center; margin-left: 8px; font-size: 11.5px; }
 .p6opts select { padding: 1px 3px; font-size: 11px; border: 1px solid var(--line); border-radius: 3px; background: var(--bg); }
-.p6dates { display: grid; gap: 3px; max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 4px; padding: 6px; }
+.p6dates { display: grid; gap: 4px; border: 1px solid var(--line); border-radius: 4px; padding: 6px; }
 .p6dates label { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 6px; align-items: center; font-size: 11.5px; }
-.p6dates label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.p6dates label > span { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.25; }   /* long names on two lines */
 .p6dates select { font-size: 11px; padding: 1px 3px; border: 1px solid var(--line); border-radius: 3px; background: var(--bg); }
 .p6b { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 16px; min-height: 0; }
 .p6tree { overflow: auto; max-height: 62vh; border: 1px solid var(--line); border-radius: 4px; }
@@ -4414,7 +4414,7 @@ function openP6Builder(M, rec, fname, mode, from = null) {
       const roles = rec["~dates"] || {}, band = rec["~band"] || {};
       const opt = (t, v, n) => `<option value="${v}" ${built.role(t) === v ? "selected" : ""}>${n}</option>`;
       dates = `<h4>Key dates</h4>
-        <div class="p6dates">${built.keyMs.map(t => `<label><span title="${esc(t.name)}"><span class="p6code">${fmt(t.start)}</span> ${esc(t.name)}</span><select data-date="${esc(t.code)}">${opt(t, "gate", "Gate line")}${opt(t, "ms", "Milestone")}${opt(t, "hide", "Leave out")}</select></label>`).join("")}</div>
+        <div class="p6dates">${p6KeyOrder(M, built).map(t => `<label><span title="${esc(t.name)}"><span class="p6code">${fmt(t.start)}</span> ${esc(t.name)}</span><select data-date="${esc(t.code)}">${opt(t, "gate", "Gate line")}${opt(t, "ms", "Milestone")}${opt(t, "hide", "Leave out")}</select></label>`).join("")}</div>
         <label class="check"><input type="checkbox" id="p6Band" ${band.on !== false ? "checked" : ""}> Phase band from the closure gate to the reopening gate</label>
         <label class="check"><input type="checkbox" id="p6Cont" ${rec["~cont"] !== false ? "checked" : ""}> Contingency zone at the end</label>
         <label class="check"><input type="checkbox" id="p6Pc" ${rec["~pc"] !== false ? "checked" : ""}> Practical completion zone</label>
@@ -4510,6 +4510,13 @@ function openP6Builder(M, rec, fname, mode, from = null) {
   }
   paintSets();
   paint();
+}
+/* key dates in use (gate lines, then milestones) first, then the rest by date; the order is fixed when the dialog opens,
+   so a date doesn't jump away from the pointer when its role changes */
+function p6KeyOrder(M, built) {
+  const rank = { gate: 0, ms: 1 }, key = t => t.code;
+  if (!M.keyOrder) M.keyOrder = new Map([...built.keyMs].sort((a, b) => (rank[built.role(a)] ?? 2) - (rank[built.role(b)] ?? 2) || (a.start < b.start ? -1 : 1)).map((t, i) => [key(t), i]));
+  return [...built.keyMs].sort((a, b) => (M.keyOrder.get(key(a)) ?? 1e9) - (M.keyOrder.get(key(b)) ?? 1e9) || (a.start < b.start ? -1 : 1));
 }
 function p6FromNote(f) {
   if (f.justSaved) return `Choices saved as “${esc(f.name)}”.`;
