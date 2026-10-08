@@ -1830,10 +1830,15 @@ function drawPage(svg, extra = {}) {
   const span = toDays(P.timeline.end) - toDays(P.timeline.start) + 1;
   const opts = { ppd: (availW * PX_PER_MM - G.headW) / span, spare: false, ...extra };
   let L = draw(svg, opts);
+  const W0 = L.W;   // the sheet's natural width: printed at the full page width, text is its true size
   const rowsTotal = L.lanes.reduce((n, ln) => n + ln.rows, 0), slack = availH / (availW / L.W) - L.H, baseRow = G.rowH;
   if (P.page.fill !== false && rowsTotal && slack > 0) { G.rowH = Math.min(baseRow * 2, baseRow + slack / rowsTotal); try { L = draw(svg, opts); } finally { G.rowH = baseRow; } }
+  // taller than the page: it has to print smaller, so spread the timeline wider first and the shrunk sheet still fills the width
+  for (let n = 0; n < 3 && L.H / L.W > availH / availW * 1.01; n++) {
+    opts.ppd = (L.H * availW / availH - G.headW) / span; L = draw(svg, opts);
+  }
   const k = Math.min(availW / L.W, availH / L.H);   // printed mm per sheet px
-  return { L, k, PW, PH, M, availW, availH, pg, fit: k / (availW / L.W) };
+  return { L, k, PW, PH, M, availW, availH, pg, fit: k / (availW / W0) };   // fit: how big the text prints against its natural size
 }
 const pageName = () => `${P.page.size} ${P.page.orient}`;
 
