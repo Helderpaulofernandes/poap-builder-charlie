@@ -86,6 +86,7 @@ button, input, select { font: inherit; color: inherit; }
 .p6opts { display: inline-flex; gap: 8px; align-items: center; margin-left: 8px; font-size: 11.5px; }
 .p6opts select { padding: 1px 3px; font-size: 11px; border: 1px solid var(--line); border-radius: 3px; background: var(--bg); }
 .p6opt { align-items: flex-start; }
+.p6taken { font-size: 11px; font-style: italic; text-align: right; }
 .p6opt .note { font-size: 11px; line-height: 1.3; }
 .p6dates { display: grid; gap: 4px; border: 1px solid var(--line); border-radius: 4px; padding: 6px; }
 .p6dates label { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 6px; align-items: center; font-size: 11.5px; }
@@ -1037,7 +1038,7 @@ function draw(svg, opts) {
   // items
   const gi = el("g", {}, svg);
   // summary bars first so the bars inside them draw on top; possession tiles last, on top of the stages
-  const rank = it => isContainer(P, it) ? 0 : isShape(P, it, "tile") ? 2 : 1;
+  const rank = it => isContainer(P, it) ? (it.parent ? .5 : 0) : isShape(P, it, "tile") ? 2 : 1;
   const ordered = [...P.items].sort((a, b) => rank(a) - rank(b));
   for (const it of ordered) {
     const ln = L.lanes.find(x => x.l.id === it.lane); if (!ln || hiddenByCollapse(P, it)) continue;
@@ -1740,7 +1741,14 @@ const BAR_SHAPES = [["bar","Plain bar"],["rounded","Rounded bar"],["poss","Hatch
 function isContainer(p, it) { return /^container/.test(styleOf(p, it.style).shape); }
 function spanOf(it) { return Math.max(1, +it.span || 2); }
 function containerChildren(p, c) { return p.items.filter(i => i !== c && i.parent === c.id); }
-function hiddenByCollapse(p, it) { if (!it.parent) return false; const c = p.items.find(x => x.id === it.parent); return !!(c && c.collapsed); }
+/* one level of nesting: a summary bar or box can hold umbrella rows (each with its own stages); umbrellas hold no summaries */
+function canNest(p, outer, inner) { return isContainer(p, outer) && isUmbrella(p, inner) && !isUmbrella(p, outer) && !outer.parent; }
+function descendants(p, c) { const out = []; for (const k of containerChildren(p, c)) { out.push(k); if (isContainer(p, k)) out.push(...containerChildren(p, k)); } return out; }
+function bottomOf(p, i) { return i.row + (isContainer(p, i) ? spanOf(i) - 1 : 0); }   // its last row (a summary: the bottom of its span)
+function hiddenByCollapse(p, it) {   // inside a collapsed summary, or an umbrella inside one
+  for (let c = it, n = 0; c && c.parent && n < 3; n++) { c = p.items.find(x => x.id === c.parent); if (c && c.collapsed) return true; }
+  return false;
+}
 /* Set how far down a summary reaches: everything in its lane from the row under its bracket down to
    bottomRow joins it (bars of another summary excepted); its own bars below bottomRow leave it. */
 function setSummaryBottom(p, c, bottomRow) {
@@ -1756,21 +1764,28 @@ function setSummaryBottom(p, c, bottomRow) {
 }
 function syncContainers(p, opts = {}) {
   const byId = new Map(p.items.map(i => [i.id, i]));
-  // a parent must exist, be a summary in the same lane; summaries don't nest
+  // a parent must exist, be a summary in the same lane; the only summaries inside summaries are umbrellas in a bar or box
   for (const i of p.items) if (i.parent) {
     const c = byId.get(i.parent);
-    if (!c || !isContainer(p, c) || isContainer(p, i) || isCurtain(p, i.style) || c.lane !== i.lane) delete i.parent;
+    if (!c || !isContainer(p, c) || (isContainer(p, i) && !canNest(p, c, i)) || isCurtain(p, i.style) || c.lane !== i.lane) delete i.parent;
   }
-  for (const c of p.items) if (isContainer(p, c)) {
+  // umbrellas inside a box first, so the box then fits around them
+  const all = p.items.filter(c => isContainer(p, c)).sort((a, b) => (b.parent ? 1 : 0) - (a.parent ? 1 : 0));
+  for (const c of all) {
     const kids = containerChildren(p, c), before = +c.span || 0;
-    kids.forEach(k => { if (k.row <= c.row) k.row = c.row + 1; });          // bars sit below the bracket
-    c.span = kids.length ? Math.max(...kids.map(k => k.row)) - c.row + 1 : 2;   // an empty summary keeps one row to drop into
+    kids.forEach(k => {   // bars (and umbrellas, with their stages) sit below the bracket
+      if (k.row > c.row) return;
+      const d = c.row + 1 - k.row; k.row += d; if (isContainer(p, k)) containerChildren(p, k).forEach(g => g.row += d);
+    });
+    c.span = kids.length ? Math.max(...kids.map(k => bottomOf(p, k))) - c.row + 1 : 2;   // an empty summary keeps one row to drop into
     // an umbrella keeps a row under its stages for the captions of its possession tiles and short stages
     if (kids.length && styleOf(p, c.style).shape === "container-umbrella" && kids.some(k => k.labelMode === "below" || styleOf(p, k.style).shape === "tile")) c.span += 1;
     // a summary that grows pushes whatever sat just below it down, so nothing ends up underneath it
     if (before && c.span > before && !opts.noPush) {
-      const grow = c.span - before, from = c.row + before, own = new Set(kids.map(k => k.id));
-      p.items.forEach(i => { if (i !== c && !own.has(i.id) && i.lane === c.lane && !isCurtain(p, i.style) && i.row >= from) i.row += grow; });
+      const grow = c.span - before, from = c.row + before, own = new Set(descendants(p, c).map(k => k.id));
+      // an umbrella inside a box pushes only the box's other contents; the box then grows and pushes what's below it
+      const outer = c.parent && byId.get(c.parent), within = outer ? new Set(descendants(p, outer).map(k => k.id)) : null;
+      p.items.forEach(i => { if (i !== c && !own.has(i.id) && (!within || within.has(i.id)) && i.lane === c.lane && !isCurtain(p, i.style) && i.row >= from) i.row += grow; });
     }
     if (c.fitChildren !== false && kids.length) {
       c.start = fromDays(Math.min(...kids.map(i => toDays(i.start)))); c.end = fromDays(Math.max(...kids.map(i => toDays(i.end))));
@@ -1787,8 +1802,13 @@ function adoptGeometricChildren(p) {
 /* the summary a dropped bar lands in: same lane, in its rows (or the row just below), overlapping its dates */
 function summaryAt(p, it) {
   if (isContainer(p, it) || isCurtain(p, it.style)) return null;
-  return p.items.find(c => isContainer(p, c) && !c.collapsed && c.lane === it.lane && it.row > c.row && it.row <= c.row + spanOf(c)
-    && toDays(it.end) >= toDays(c.start) && toDays(it.start) <= toDays(c.end)) || null;
+  return p.items.filter(c => isContainer(p, c) && !c.collapsed && c.lane === it.lane && it.row > c.row && it.row <= c.row + spanOf(c)
+    && toDays(it.end) >= toDays(c.start) && toDays(it.start) <= toDays(c.end)).sort((a, b) => spanOf(a) - spanOf(b))[0] || null;
+}
+/* the summary bar or box an umbrella dropped in its rows belongs to */
+function boxAt(p, u) {
+  return p.items.find(c => c !== u && canNest(p, c, u) && !c.collapsed && c.lane === u.lane && u.row > c.row && u.row < c.row + spanOf(c)
+    && toDays(u.end) >= toDays(c.start) && toDays(u.start) <= toDays(c.end)) || null;
 }
 /* rows hidden by collapsed summaries, per lane: the display skips them, the stored rows don't change */
 function hiddenRows(p, laneId) {
@@ -1963,7 +1983,7 @@ $("chart").addEventListener("pointerdown", e => {
     sel = { type: "item", id };
     drag = { id, part: t.getAttribute("data-part") || "body", x0: p.x, y0: p.y, orig: clone(it), before: JSON.stringify(P), moved: false, toggle: shiftBody, prevSel };
     // a summary bar carries the bars inside it
-    if (isContainer(P, it) && drag.part === "body") drag.kids = containerChildren(P, it).map(k => ({ id: k.id, orig: clone(k) }));
+    if (isContainer(P, it) && drag.part === "body") drag.kids = descendants(P, it).map(k => ({ id: k.id, orig: clone(k) }));
     if (drag.part === "b") drag.parents = new Map(P.items.map(i => [i.id, i.parent]));   // membership before this drag
     if (group && drag.part === "body") {
       const skip = new Set([id, ...(drag.kids || []).map(k => k.id)]);
@@ -2120,6 +2140,7 @@ window.addEventListener("pointerup", e => {
       const c = summaryAt(P, it);
       if (c) it.parent = c.id; else delete it.parent;
     }
+    if (it && drag.part === "body" && isUmbrella(P, it)) { const b = boxAt(P, it); if (b) it.parent = b.id; else delete it.parent; }   // an umbrella in or out of a box
     past.push(drag.before); future = []; changed();
   }
   drag = null;
@@ -2266,7 +2287,7 @@ function selectItems(ids) {
 /* summaries take the bars inside them along */
 function withChildren(ids) {
   const out = new Set(ids);
-  ids.forEach(id => { const c = P.items.find(i => i.id === id); if (c && isContainer(P, c)) containerChildren(P, c).forEach(k => out.add(k.id)); });
+  ids.forEach(id => { const c = P.items.find(i => i.id === id); if (c && isContainer(P, c)) descendants(P, c).forEach(k => out.add(k.id)); });
   return [...out];
 }
 function deleteItems(ids) {
@@ -2883,12 +2904,12 @@ async function baselineFromFile(f) {
 
 /* extra inspector controls: label position for bars; height and grouping for summary bars */
 function itemExtras(cur) {
-  const groups = P.items.filter(i => isContainer(P, i) && i.lane === cur.lane && i !== cur);
-  const groupPick = !isContainer(P, cur) && groups.length ? `<div class="f"><label for="iParent">In summary</label><select id="iParent"><option value="">(none)</option>${groups.map(g => `<option value="${esc(g.id)}" ${cur.parent === g.id ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select></div>` : "";
+  const groups = P.items.filter(i => isContainer(P, i) && i.lane === cur.lane && i !== cur && (!isContainer(P, cur) || canNest(P, i, cur)));
+  const groupPick = (!isContainer(P, cur) || isUmbrella(P, cur)) && groups.length ? `<div class="f"><label for="iParent">In summary</label><select id="iParent"><option value="">(none)</option>${groups.map(g => `<option value="${esc(g.id)}" ${cur.parent === g.id ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select></div>` : "";
   if (isMs(P, cur.style)) return groupPick;
   if (isContainer(P, cur)) {
     const kids = containerChildren(P, cur), box = styleOf(P, cur.style).shape === "container-box";
-    return `<div class="tagfmt">
+    return `${groupPick}<div class="tagfmt">
       <div class="actions"><button class="btn primary" id="cCollapse">${cur.collapsed ? "Expand" : "Collapse"}</button><span class="note">${kids.length} item${kids.length === 1 ? "" : "s"} inside${cur.collapsed ? ", hidden" : ""}</span></div>
       <div class="f"><label>Look</label><div class="seg" role="group" aria-label="Summary look"><button type="button" data-look="container" aria-pressed="${!box}">Bracket</button><button type="button" data-look="container-box" aria-pressed="${box}">Box</button></div></div>
       <div class="f"><label>Activities in this summary</label><div class="actions"><button class="btn" id="cGrow" ${cur.collapsed ? "disabled" : ""}>+ Include the row below</button><button class="btn" id="cShrink" ${cur.collapsed || !kids.length ? "disabled" : ""}>− Release the bottom row</button></div></div>
@@ -2906,6 +2927,11 @@ function bindItemExtras(cur) {
   $("side").querySelectorAll("button[data-label]").forEach(b => b.onclick = () => upd(x => { if (b.dataset.label === "auto") delete x.labelMode; else x.labelMode = b.dataset.label; }));
   if ($("iParent")) $("iParent").onchange = e => upd(x => {
     const g = P.items.find(i => i.id === e.target.value);
+    if (isContainer(P, x)) {   // an umbrella: into the bottom of the box, its stages along with it (the box grows to fit)
+      if (!g) { delete x.parent; return; }
+      const d = bottomOf(P, g) + 1 - x.row; x.parent = g.id; g.collapsed = false; x.row += d; containerChildren(P, x).forEach(k => k.row += d);
+      return;
+    }
     if (!g) { delete x.parent; x.row = 999; x.row = freeRow(P, x); return; }
     x.parent = g.id; g.collapsed = false;
     x.row = 999; x.row = groupFreeRow(P, g, x);
@@ -4118,8 +4144,8 @@ function p6BuildSummary(M, rec) {
   const occ = new Map(), occOf = l => occ.get(l) || occ.set(l, []).get(l);
   const take = (l, n) => { const a = occOf(l), r = a.length; for (let k = 0; k < n; k++) a.push(Infinity); cursor.set(l, a.length); return r; };
   // the first rows free from day s for h rows (the umbrella title reaches past a short bar, so the window is widened for it)
-  const place = (l, h, s, e) => {
-    const a = occOf(l); let top = 0;
+  const place = (l, h, s, e, minRow = 0) => {
+    const a = occOf(l); let top = minRow;
     while (!a.slice(top, top + h).every(f => f < s)) top++;
     for (let k = 0; k < h; k++) a[top + k] = Math.max(a[top + k] ?? -Infinity, e);
     cursor.set(l, a.length); return top;
@@ -4179,12 +4205,12 @@ function p6BuildSummary(M, rec) {
   }
   // 3. the work: lanes, umbrellas (with their stages and possession tiles), plain bars and zones, in WBS order
   const tilesDone = new Set();
-  const umbrella = (w, lane) => {
+  const umbrella = (w, lane, box = null) => {   // box: { id, minRow } when it sits inside a summary box
     const design = p6IsDesign(w), acts = p6Roll(M, w).work;
     if (!acts.length) return;
     const faces = (rec["~split"] || {})[w.path] === false ? [] : p6Faces(acts);
     const how = (rec["~stages"] || {})[w.path] || p6StageMode(M, w);
-    if (faces.length >= 2 || !lane) lane = addLane(w.path, w.name);   // an area split by face gets a lane of its own
+    if (!box && (faces.length >= 2 || !lane)) lane = addLane(w.path, w.name);   // an area split by face gets a lane of its own (inside a box it stays put)
     const groups = faces.length >= 2 ? faces.map(f => ({ face: f, acts: acts.filter(t => { const m = t.name.match(FACE_RE); return !m || m[1].toLowerCase() === f.toLowerCase(); }) })) : [{ face: "", acts }];
     for (const g of groups) {
       const id = "WBS " + w.path + (g.face ? " " + g.face[0] : "");
@@ -4194,8 +4220,8 @@ function p6BuildSummary(M, rec) {
       const name = (g.face ? g.face + " " : "") + p6Short(w.name).replace(/^(southern|northern|eastern|western)\s+/i, "");
       const tiles = rec["~tiles"] !== false && g.acts.some(t => !tilesDone.has(t.code) && p6PossType(t));
       const half = Math.max(0, (textW(name, 9, 700) + 24) / dayPx() - (toDays(e) - toDays(s))) / 2;
-      const top = place(lane, tiles ? 3 : 2, toDays(s) - half - 14, toDays(e) + half + 14);
-      rows.push({ id, name, style: p6UStyle(w, design), lane: lane.name, start: s, end: e, status: "Active", row: top, y: NaN, fill: "", stroke: "", p6: { crit: crit(g.acts) }, acts: g.acts });
+      const top = place(lane, tiles ? 3 : 2, toDays(s) - half - 14, toDays(e) + half + 14, box ? box.minRow : 0);
+      rows.push({ id, name, style: p6UStyle(w, design), lane: lane.name, start: s, end: e, status: "Active", row: top, y: NaN, fill: "", stroke: "", p6: { crit: crit(g.acts) }, acts: g.acts, ...(box ? { parent: box.id } : {}) });
       stages.forEach(st => rows.push({ id: `${id} · ${st.key}`, name: st.name, style: "BAR", lane: lane.name, start: st.s, end: st.e, status: "Active", row: top + 1, y: NaN, fill: "", stroke: "", parent: id }));
       if (rec["~tiles"] !== false) g.acts.filter(t => !tilesDone.has(t.code) && p6PossType(t)).forEach(t => {
         tilesDone.add(t.code);
@@ -4218,28 +4244,30 @@ function p6BuildSummary(M, rec) {
       return;
     }
     if (m === "umbrella") return umbrella(w, lane);
-    if (m === "group") {   // the package as a summary box, its parts as bars inside it (a part set to "look inside" gives its own parts)
+    if (m === "group") {   // the package as a summary box: inside it, umbrella rows (with their stages) and bars
       lane = lane || addLane(w.path.split(".")[0], (M.top.kids.find(k => k.path === w.path.split(".")[0]) || w).name);
       const col = (summaryStyleDefaults().find(x => x.name === p6UStyle(w, p6IsDesign(w))) || {}).fill || BRAND.navy;
       const parts = [], collect = k => {
         const mk = mode(k), rk = p6Roll(M, k);
         if (!rk.inc.length || ["hide", "possess", "ms"].includes(mk)) return;
         if (mk === "zone") return visit(k, lane);
-        if (mk === "split") return k.kids.forEach(collect);
-        if (rk.s) parts.push({ k, rk });
+        if (["split", "lane", "group"].includes(mk)) return k.kids.forEach(collect);   // not shown: its own parts take its place
+        if (rk.s) parts.push({ k, rk, umb: mk === "umbrella" });
       };
       w.kids.forEach(collect);
-      const id = "WBS " + w.path, box = { id, name: p6Short(w.name), style: "SUMMARY_BOX", lane: lane.name, start: r.s, end: r.e, status: "Active", row: 0, y: NaN, fill: "", stroke: shade(col, .25), p6: { crit: crit(r.inc) }, acts: r.inc };
-      rows.push(box);
-      // parts that follow one another share a row, leaving room for a name beside the bar
-      const ends = [];
-      parts.sort((a, b) => a.rk.s < b.rk.s ? -1 : 1).forEach(({ k, rk }) => {
+      const id = "WBS " + w.path, boxTop = take(lane, 1), a = occOf(lane), inside = { id, minRow: boxTop + 1 };
+      rows.push({ id, name: p6Short(w.name), style: "SUMMARY_BOX", lane: lane.name, start: r.s, end: r.e, status: "Active", row: boxTop, y: NaN, fill: "", stroke: shade(col, .25), p6: { crit: crit(r.inc) }, acts: r.inc });
+      // umbrella rows first (ones that follow each other share rows), then the bars under them
+      parts.filter(x => x.umb).forEach(({ k }) => umbrella(k, lane, inside));
+      for (let i = inside.minRow; i < a.length; i++) a[i] = Infinity;
+      inside.minRow = Math.max(inside.minRow, a.length);
+      parts.filter(x => !x.umb).sort((x, y) => x.rk.s < y.rk.s ? -1 : 1).forEach(({ k, rk }) => {
         const name = p6Short(k.name), s0 = toDays(rk.s), e0 = toDays(rk.e) + (textW(name, 9, 500) + 16) / dayPx();
-        let i = ends.findIndex(x => x < s0); if (i < 0) { i = ends.length; ends.push(0); } ends[i] = e0;
-        rows.push({ id: "WBS " + k.path, name, style: "BAR", lane: lane.name, start: rk.s, end: rk.e, status: "Active", row: i + 1, y: NaN, fill: tint(col, .5), stroke: "", parent: id, p6: { crit: crit(rk.inc) }, acts: rk.inc });
+        rows.push({ id: "WBS " + k.path, name, style: "BAR", lane: lane.name, start: rk.s, end: rk.e, status: "Active", row: place(lane, 1, s0, e0, inside.minRow), y: NaN, fill: tint(col, .5), stroke: "", parent: id, p6: { crit: crit(rk.inc) }, acts: rk.inc });
       });
-      const top = take(lane, 1 + Math.max(1, ends.length));
-      rows.filter(x => x === box || x.parent === id).forEach(x => x.row += top);
+      if (a.length <= boxTop + 1) take(lane, 1);   // an empty box keeps a row
+      for (let i = boxTop; i < a.length; i++) a[i] = Infinity;   // the box's rows are its own: nothing after it packs into them
+      cursor.set(lane, a.length);
       return;
     }
     w.kids.forEach(k => visit(k, lane));
@@ -4349,7 +4377,11 @@ function p6ApplyChoices(M, rec, set) {
 }
 /* the scenario named in the file: "P26-8287 RESOURCE HEAVY.xer" → "Resource Heavy" */
 const p6Scenario = fname => fname.replace(/\.xer$/i, "").replace(/^[A-Z]{0,4}-?\d[\w-]*\s+/i, "").trim().toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
-const P6_MODES_SUMMARY = [["lane", "Lane (parts below)"], ["umbrella", "Umbrella row"], ["group", "Summary box (parts inside)"], ["split", "Look inside"], ["possess", "Possession lane"], ["ms", "Key dates"], ["zone", "Zone (large label)"], ["bar", "One bar"], ["hide", "Leave out"]];
+const P6_MODES_SUMMARY = [["lane", "Lane"], ["group", "Summary box"], ["umbrella", "Umbrella row"], ["bar", "One bar"], ["split", "Not shown (its parts are)"], ["zone", "Zone (large label)"], ["ms", "Key dates"], ["possess", "Possession lane"], ["hide", "Leave out"]];
+// inside a summary box a part is an umbrella row (its stages below it) or a bar; or not shown, its own parts taking its place
+const P6_MODES_IN_BOX = [["umbrella", "Umbrella row"], ["bar", "One bar"], ["split", "Not shown (its parts are)"], ["hide", "Leave out"]];
+// what a part's own parts become when it's drawn as a whole (shown greyed in the tree, no choice to make)
+const P6_TAKEN = { umbrella: "in the umbrella row above", bar: "in the bar above", zone: "in the zone above", ms: "key dates are picked on the right", possess: "in the possession lane", hide: "left out with the part above" };
 function openP6Builder(M, rec, fname, mode, from = null) {
   const update = mode === "update";
   const otherScenario = update && p6Scenario(fname) && p6Scenario(fname).toLowerCase() !== String(P.meta.title || "").toLowerCase();
@@ -4422,20 +4454,25 @@ function openP6Builder(M, rec, fname, mode, from = null) {
     m.querySelectorAll("[data-style]").forEach(b => b.setAttribute("aria-pressed", (rec["~style"] || "detailed") === b.dataset.style));
     const modes = summary() ? P6_MODES_SUMMARY : P6_MODES;
     const rows = [], scroll = tree.scrollTop;
-    const add = w => {
+    const add = (w, ctx = {}) => {   // ctx: { taken: why it has no choice of its own } or { inBox: true }
       const r = p6Roll(M, w); if (!r.all.length) return;
       const md = rec[w.path] || "hide", kidsHere = w.kids.some(k => p6Roll(M, k).all.length);
+      const here = !summary() ? modes : ctx.inBox ? P6_MODES_IN_BOX : modes;
       const extra = summary() && md === "umbrella" ? (() => {
         const how = (rec["~stages"] || {})[w.path] || p6StageMode(M, w), faces = p6Faces(r.work), split = (rec["~split"] || {})[w.path] !== false;
         return `<span class="p6opts"><select data-stages="${esc(w.path)}" aria-label="Stages from"><option value="keywords" ${how === "keywords" ? "selected" : ""}>Stages by type of work</option><option value="wbs" ${how === "wbs" ? "selected" : ""}>Stages from its WBS</option></select>
           ${faces.length >= 2 ? `<label class="check" title="One umbrella per side, in a lane of its own"><input type="checkbox" data-split="${esc(w.path)}" ${split ? "checked" : ""}> ${faces.join(" / ")}</label>` : ""}</span>`;
       })() : "";
-      rows.push(`<div class="p6row ${md === "hide" ? "off" : ""}" style="--d:${w.depth - 1}">
+      rows.push(`<div class="p6row ${md === "hide" || ctx.taken ? "off" : ""}" style="--d:${w.depth - 1}">
         <button type="button" class="p6tog" data-tog="${esc(w.path)}" ${kidsHere ? "" : "disabled"} aria-label="${open.has(w.path) ? "Collapse" : "Expand"}">${kidsHere ? (open.has(w.path) ? "▾" : "▸") : ""}</button>
         <span class="p6name" title="${esc(w.path)} · ${esc(w.name)}"><span class="p6code">${esc(w.code)}</span> ${esc(w.name)}${extra}</span>
         <span class="p6meta">${r.s ? `${fmt(r.s)} – ${fmt(r.e)}` : ""}<br>${r.work.length} act${r.ms.length ? ` · ${r.ms.length} ms` : ""}${r.left ? ` · <span class="warn" title="Unlinked activities at the data date, left out of the dates">${r.left} left out</span>` : ""}</span>
-        <select data-mode="${esc(w.path)}" aria-label="What ${esc(w.name)} shows">${modes.map(([v, n]) => `<option value="${v}" ${v === md ? "selected" : ""}>${n}</option>`).join("")}${modes.some(([v]) => v === md) ? "" : `<option value="${esc(md)}" selected>${esc(md)}</option>`}</select></div>`);
-      if (open.has(w.path) && (showKids(w) || md === "hide")) w.kids.forEach(add);
+        ${ctx.taken ? `<span class="note p6taken">${ctx.taken}</span>` : `<select data-mode="${esc(w.path)}" aria-label="What ${esc(w.name)} shows">${here.map(([v, n]) => `<option value="${v}" ${v === md ? "selected" : ""}>${n}</option>`).join("")}${here.some(([v]) => v === md) ? "" : `<option value="${esc(md)}" selected>${esc((modes.find(([v]) => v === md) || [md, md])[1])}</option>`}</select>`}</div>`);
+      if (!open.has(w.path)) return;
+      if (!summary()) { if (showKids(w) || md === "hide") w.kids.forEach(k => add(k)); return; }
+      // what its parts can be: chosen one by one (lane, box, not shown), or taken by it (umbrella, bar, zone…)
+      const kidCtx = ctx.taken ? { taken: ctx.taken } : md === "group" ? { inBox: true } : md === "split" ? { inBox: !!ctx.inBox } : md === "lane" ? {} : { taken: P6_TAKEN[md] || "in the part above" };
+      w.kids.forEach(k => add(k, kidCtx));
     };
     M.top.kids.forEach(add);
     tree.innerHTML = rows.join(""); tree.scrollTop = scroll;
@@ -4443,7 +4480,7 @@ function openP6Builder(M, rec, fname, mode, from = null) {
     const built = summary() ? p6BuildSummary(M, rec) : p6Build(M, rec), items = built.rows, lanes = built.lanes;
     const count = (its, test, w) => { const n = its.filter(test).length; return n ? `${n} ${w}${n > 1 ? "s" : ""}` : ""; };
     const per = lanes.map(l => { const its = items.filter(i => i.lane === l.name);
-      return `<li><b>${esc(l.name)}</b><span class="note">${[count(its, i => /^U_/.test(i.style), "umbrella"), count(its, i => i.style === "SUMMARY_BOX", "summary box"), count(its, i => i.style === "BAR" && !i.parent, "bar"), count(its, i => i.style === "BAR" && i.parent, "stage"), count(its, i => /^POS_/.test(i.style), "possession"), count(its, i => /^ML_/.test(i.style), "milestone")].filter(Boolean).join(", ")}</span></li>`; }).join("");
+      return `<li><b>${esc(l.name)}</b><span class="note">${[count(its, i => /^U_/.test(i.style), "umbrella"), count(its, i => i.style === "SUMMARY_BOX", "summary box"), count(its, i => i.style === "BAR" && !i.parent, "bar"), count(its, i => i.style === "BAR" && i.parent && !its.some(b => b.id === i.parent && b.style === "SUMMARY_BOX"), "stage"), count(its, i => /^POS_/.test(i.style), "possession"), count(its, i => /^ML_/.test(i.style), "milestone")].filter(Boolean).join(", ")}</span></li>`; }).join("");
     const left = M.includeAll ? 0 : M.out.size;
     let dates = "";
     if (summary() && built.keyMs.length) {
@@ -4477,7 +4514,7 @@ function openP6Builder(M, rec, fname, mode, from = null) {
     const s = e.target.closest("[data-mode]"), st = e.target.closest("[data-stages]"), sp = e.target.closest("[data-split]");
     if (s) {
       rec[s.dataset.mode] = s.value; if (["lane", "split", "group"].includes(s.value)) open.add(s.dataset.mode);
-      if (s.value === "group") { const w = M.nodes.find(x => x.path === s.dataset.mode); (w ? w.kids : []).forEach(k => { if (["umbrella", "group", "lane"].includes(rec[k.path]) || !rec[k.path]) rec[k.path] = p6Roll(M, k).work.length ? "bar" : "hide"; }); }
+      if (s.value === "group") { const w = M.nodes.find(x => x.path === s.dataset.mode); (w ? w.kids : []).forEach(k => { const n = p6Roll(M, k).work.length; if (!["umbrella", "bar", "split", "hide"].includes(rec[k.path])) rec[k.path] = n >= 3 ? "umbrella" : n ? "bar" : "hide"; }); }
     }
     if (st) rec["~stages"] = { ...(rec["~stages"] || {}), [st.dataset.stages]: st.value };
     if (sp) rec["~split"] = { ...(rec["~split"] || {}), [sp.dataset.split]: sp.checked };

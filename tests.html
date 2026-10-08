@@ -298,6 +298,19 @@ const TESTS = {
     const t2 = [...document.querySelectorAll("#chart text")].find(x => x.textContent === "Big zone");
     T.ok(t2 && t2.getAttribute("fill") !== "#C00000", "automatic again once it's cleared");
   },
+  "P6 summary style: a summary box with umbrella rows inside": () => {
+    const M = p6Model(parseXer(T.xer())), rec = p6SuggestSummary(M);
+    rec["C"] = "group"; rec["C.A"] = "umbrella"; rec["C.B"] = "umbrella";
+    const { p } = p6MakeProject(M, rec, "T-100 OPTION A.xer"); loadDoc(p, null);
+    const box = T.item("WBS C"), a = T.item("WBS C.A"), b = T.item("WBS C.B");
+    T.eq([box.style, a.parent, b.parent], ["SUMMARY_BOX", "WBS C", "WBS C"], "the umbrellas sit in the box");
+    T.ok(containerChildren(P, a).length >= 1 && containerChildren(P, a).every(k => k.row > a.row), "each umbrella keeps its stages under it");
+    T.ok(box.row + spanOf(box) - 1 >= Math.max(...descendants(P, box).map(k => bottomOf(P, k))), "the box reaches the bottom of everything inside");
+    const H = LAY.H; commit(q => q.items.find(i => i.id === "WBS C").collapsed = true, true);
+    T.ok(LAY.H < H && !document.querySelector('#chart [data-id="WBS C.A"]'), "collapsing the box hides the umbrellas and their stages");
+    undo();
+    T.eq([canNest(P, box, a), canNest(P, a, box), canNest(P, box, T.item("WBS C"))], [true, false, false], "only umbrellas go in a box, one level deep");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));
