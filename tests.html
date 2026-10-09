@@ -388,6 +388,28 @@ const TESTS = {
     T.eq([plan.mode, LAY.labels.keyList.map(k => k.name)], ["key", [stage.name]], "numbered and listed");
     T.ok([...document.querySelectorAll("#chart text")].some(t => t.textContent === stage.name), "the key at the foot of the sheet names it");
   },
+  "An umbrella's stages can be switched in the side panel": () => {
+    const M = p6Model(parseXer(T.xer())), rec = p6SuggestSummary(M);
+    rec["C"] = "lane"; rec["C.A"] = "umbrella"; rec["~stages"] = { "C.A": "wbs" };
+    const { p } = p6MakeProject(M, rec, "T-100 OPTION A.xer"); p.p6 = { recipe: p6Recipe(M, rec), code: "T-100", source: "T-100 OPTION A.xer" }; loadDoc(p, null);
+    const u = T.item("WBS C.A"), stages = () => containerChildren(P, T.item("WBS C.A")).map(k => k.name);
+    T.eq([u.stagesBy, stages()], ["wbs", ["Segment 1", "Segment 2"]], "from its WBS");
+    sel = { type: "item", id: "WBS C.A" }; render(); renderSide();
+    const kw = document.querySelector('#side [data-stagesby="keywords"]'), wb = document.querySelector('#side [data-stagesby="wbs"]');
+    T.ok(kw && wb && wb.getAttribute("aria-pressed") === "true", "the choice is in the side panel");
+    if (!kw.disabled) { kw.click(); T.eq([T.item("WBS C.A").stagesBy, P.p6.recipe["~stages"]["C.A"]], ["keywords", "keywords"], "switched, and remembered for updates"); undo(); }
+    T.eq(stages(), ["Segment 1", "Segment 2"], "undo puts the stages back");
+  },
+  "Change the XER choices reopens the importer without the file": async () => {
+    await importP6(new File([T.xer()], "T-100 OPTION A.xer"), "new");
+    document.querySelector(".modal [data-act=go]").click();
+    await new Promise(r => setTimeout(r, 150));
+    T.clean();
+    await document.getElementById("bP6Edit").onclick();
+    const m = document.querySelector(".modal");
+    T.ok(m && /Update from P6: T-100 OPTION A\.xer/.test(m.querySelector("h3").textContent), "the importer opens on the same file");
+    T.ok(m.querySelector("#p6Tree [data-mode]"), "with the choices to change");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));

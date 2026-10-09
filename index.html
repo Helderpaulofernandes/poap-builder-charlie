@@ -339,6 +339,7 @@ table.diff td:first-child { font-family: var(--font-mono); white-space: nowrap; 
         <hr>
         <button type="button" role="menuitem" id="bP6New"><b>New summary from P6 (XER)…</b><span class="note">Pick what each part of the WBS shows; a suggestion to start from</span></button>
         <button type="button" role="menuitem" id="bP6Upd"><b>Update from P6 (XER)…</b><span class="note">Next month's export or another scenario, summarised the same way</span></button>
+        <button type="button" role="menuitem" id="bP6Edit"><b>Change the XER choices…</b><span class="note">Back to the P6 summary choices for this programme, to add what was left out</span></button>
       </div>
     </div>
     <button class="btn primary" id="bPdf">Export PDF</button>
@@ -2963,7 +2964,11 @@ function itemExtras(cur) {
       <div class="f"><label for="cTitleCol">Title colour</label><input id="cTitleCol" type="color" value="${tf.colour || (isUmbrella(P, cur) ? textOn(umbrellaColour(cur, P.lanes.find(l => l.id === cur.lane) || null)) : BRAND.navy)}"></div>
       ${cur.titleAlign || cur.titleSize || cur.titleWeight || cur.titleColour ? `<p class="note"><a href="#" id="cTitleReset">Default title</a></p>` : ""}
     </div>`;
-    return `${groupPick}${titleCtl}<div class="tagfmt">
+    const sets = cur.stageSets, stageCtl = sets ? `<div class="tagfmt">
+      <div class="f"><label>Stages</label><div class="seg" role="group" aria-label="Stages from">${[["keywords", "By type of work"], ["wbs", "From its WBS"]].map(([v, n]) => `<button type="button" data-stagesby="${v}" aria-pressed="${(cur.stagesBy || "keywords") === v}" ${(sets[v] || []).length ? "" : "disabled title='Nothing to make stages from this way'"}>${n}</button>`).join("")}</div></div>
+      <p class="note">${(sets.keywords || []).length} by type of work · ${(sets.wbs || []).length} from its WBS. Switching replaces this umbrella's stage bars (possession tiles stay)${cur.p6path && P.items.some(i => i !== cur && isUmbrella(P, i) && i.p6path === cur.p6path) ? ", and its other face's, which comes from the same WBS part" : ""}.</p>
+    </div>` : "";
+    return `${groupPick}${titleCtl}${stageCtl}<div class="tagfmt">
       <div class="actions"><button class="btn primary" id="cCollapse">${cur.collapsed ? "Expand" : "Collapse"}</button><span class="note">${kids.length} item${kids.length === 1 ? "" : "s"} inside${cur.collapsed ? ", hidden" : ""}</span></div>
       <div class="f"><label>Look</label><div class="seg" role="group" aria-label="Summary look">${[["container", "Bracket"], ["container-box", "Box"], ...(P.styles.some(s => s.shape === "container-umbrella") ? [["container-umbrella", "Umbrella"]] : [])].map(([v, n]) => `<button type="button" data-look="${v}" aria-pressed="${styleOf(P, cur.style).shape === v}">${n}</button>`).join("")}</div></div>
       <div class="f"><label>Activities in this summary</label><div class="actions"><button class="btn" id="cGrow" ${cur.collapsed ? "disabled" : ""}>+ Include the row below</button><button class="btn" id="cShrink" ${cur.collapsed || !kids.length ? "disabled" : ""}>− Release the bottom row</button></div></div>
@@ -2994,6 +2999,23 @@ function bindItemExtras(cur) {
   // a summary's title: the default value is stored as nothing, so the type's look still applies
   const tDef = { titleAlign: titleFmt(P, cur).def, titleSize: "M", titleWeight: "bold" };
   $("side").querySelectorAll("[data-tset]").forEach(b => b.onclick = () => upd(x => { const k = b.dataset.tset; if (b.dataset.val === tDef[k]) delete x[k]; else x[k] = b.dataset.val; }));
+  // an umbrella from P6: rebuild its stage bars from the other version kept at import, and remember the choice for updates
+  // (both faces of a split area come from one WBS part: they switch together, as the next update would build them)
+  $("side").querySelectorAll("[data-stagesby]").forEach(b => b.onclick = () => commit(p => {
+    const me = p.items.find(i => i.id === cur.id), how = b.dataset.stagesby;
+    const all = me.p6path ? p.items.filter(i => isUmbrella(p, i) && i.p6path === me.p6path) : [me];
+    for (const u of all) {
+      const set = (u.stageSets || {})[how];
+      if (!set || !set.length || u.stagesBy === how) continue;
+      const old = new Set(containerChildren(p, u).filter(k => k.id.startsWith(u.id + " · ")).map(k => k.id));
+      p.items = p.items.filter(i => !old.has(i.id));
+      p.items.forEach(i => { if (i.preds) i.preds = i.preds.filter(r => !old.has(r.id)); });
+      set.forEach(st => p.items.push({ id: `${u.id} · ${st.key}`, name: st.name, style: "BAR", lane: u.lane, start: st.s, end: st.e, status: "Active", row: u.row + 1, fill: "", stroke: "", parent: u.id }));
+      u.stagesBy = how;
+    }
+    if (p.p6 && p.p6.recipe && me.p6path) p.p6.recipe["~stages"] = { ...(p.p6.recipe["~stages"] || {}), [me.p6path]: how };
+    syncContainers(p);
+  }, true));
   if ($("cTitleCol")) $("cTitleCol").onchange = e => upd(x => x.titleColour = e.target.value.toUpperCase());
   if ($("cTitleReset")) $("cTitleReset").onclick = e => { e.preventDefault(); upd(x => ["titleAlign", "titleSize", "titleWeight", "titleColour"].forEach(k => delete x[k])); };
   const lastRow = x => { const k = containerChildren(P, x); return k.length ? Math.max(...k.map(i => i.row)) : x.row; };
@@ -4280,14 +4302,16 @@ function p6BuildSummary(M, rec) {
     const groups = faces.length >= 2 ? faces.map(f => ({ face: f, acts: acts.filter(t => { const m = t.name.match(FACE_RE); return !m || m[1].toLowerCase() === f.toLowerCase(); }) })) : [{ face: "", acts }];
     for (const g of groups) {
       const id = "WBS " + w.path + (g.face ? " " + g.face[0] : "");
-      let stages = p6Stages(M, w, g.acts, how, design);
-      if (stages.length < 2 && how === "keywords") stages = p6Stages(M, w, g.acts, "wbs", design);
+      let stages = p6Stages(M, w, g.acts, how, design), by = how;
+      if (stages.length < 2 && how === "keywords") { stages = p6Stages(M, w, g.acts, "wbs", design); by = "wbs"; }
+      const slim = a => a.map(x => ({ key: x.key, name: x.name, s: x.s, e: x.e }));
+      const stageSets = { keywords: slim(by === "keywords" ? stages : p6Stages(M, w, g.acts, "keywords", design)), wbs: slim(by === "wbs" ? stages : p6Stages(M, w, g.acts, "wbs", design)) };
       const sp = p6Span(g.acts), s = stages.length ? stages[0].s : sp.s, e = stages.length ? stages.reduce((m, x) => x.e > m ? x.e : m, sp.e) : sp.e;
       const name = (g.face ? g.face + " " : "") + p6Short(w.name).replace(/^(southern|northern|eastern|western)\s+/i, "");
       const tiles = rec["~tiles"] !== false && g.acts.some(t => !tilesDone.has(t.code) && p6PossType(t));
       const half = Math.max(0, (textW(name, 9, 700) + 24) / dayPx() - (toDays(e) - toDays(s))) / 2;
       const top = place(lane, tiles ? 3 : 2, toDays(s) - half - 14, toDays(e) + half + 14, box ? box.minRow : 0);
-      rows.push({ id, name, style: p6UStyle(w, design), lane: lane.name, start: s, end: e, status: "Active", row: top, y: NaN, fill: "", stroke: "", p6: { crit: crit(g.acts) }, acts: g.acts, ...(box ? { parent: box.id } : {}) });
+      rows.push({ id, name, style: p6UStyle(w, design), lane: lane.name, start: s, end: e, status: "Active", row: top, y: NaN, fill: "", stroke: "", p6: { crit: crit(g.acts) }, acts: g.acts, ...(box ? { parent: box.id } : {}), x: { p6path: w.path, stagesBy: by, stageSets } });
       stages.forEach(st => rows.push({ id: `${id} · ${st.key}`, name: st.name, style: "BAR", lane: lane.name, start: st.s, end: st.e, status: "Active", row: top + 1, y: NaN, fill: "", stroke: "", parent: id }));
       if (rec["~tiles"] !== false) g.acts.filter(t => !tilesDone.has(t.code) && p6PossType(t)).forEach(t => {
         tilesDone.add(t.code);
@@ -4408,7 +4432,8 @@ function p6PreviewSvg(project, width) {
 
 /* entry point: a new programme from an XER, or an update of this one (mode "update") */
 async function importP6(file, mode) {
-  const M = p6Model(parseXer(await readXerText(file)));
+  const text = await readXerText(file), M = p6Model(parseXer(text));
+  idbSet("xer:" + (M.code || "?"), { name: file.name, text, saved: new Date().toISOString() });   // this browser only: to change the choices later without finding the file
   const saved = mode === "update" && P.p6 && P.p6.recipe;
   if (mode === "update" && P.p6 && P.p6.code && M.code && P.p6.code !== M.code)
     toast(`Note: this programme was built from ${P.p6.code}; the file is ${M.code}.`, 6000);
@@ -4483,6 +4508,9 @@ function openP6Builder(M, rec, fname, mode, from = null) {
         const built = summary() ? p6BuildSummary(M, rec) : p6Build(M, rec), rows = built.rows, lanes = built.lanes;
         if (!rows.length) { toast("Nothing is selected to show."); return false; }
         if (summary()) ensureSummaryStyles(P);
+        // summaries' dates as the sheet fits them around what's inside (tiles too), so unchanged ones don't show as changes
+        const fitted = (p6MakeProject(M, rec, fname).p || { items: [] }).items, byId = new Map(fitted.map(i => [i.id, i]));
+        rows.forEach(r => { const f = byId.get(r.id); if (f && /^container/.test(styleOf(P, r.style).shape || "") && f.fitChildren !== false) { r.start = f.start; r.end = f.end; } });
         // existing items keep the row they have on the sheet; new ones go where the summary puts them
         rows.forEach(r => { if (P.items.some(i => i.id === r.id)) r.row = NaN; });
         const keep = m.querySelector("#p6Keep")?.checked, sep = m.querySelector("#p6Sep")?.checked;
@@ -4684,6 +4712,15 @@ $("fXer").onchange = async e => {
 const pickXer = mode => { $("fXer").dataset.mode = mode; $("fXer").click(); };
 $("bP6New").onclick = () => guardUnsaved(() => pickXer("new"));
 $("bP6Upd").onclick = () => pickXer("update");
+$("bP6Edit").onclick = async () => {
+  if (!P.p6 || !P.p6.recipe) return toast("This programme wasn't made from a P6 file. Use New summary from P6 (XER) instead.", 6000);
+  const c = await idbGet("xer:" + (P.p6.code || "?"));
+  if (c && c.text && c.name === P.p6.source) {
+    try { return await importP6(new File([c.text], c.name), "update"); } catch (err) { toast("Couldn't read the kept copy: " + err.message, 6000); }
+  }
+  toast(`This browser has no copy of ${P.p6.source || "the XER"}: pick it again and your choices open as you left them.`, 7000);
+  pickXer("update");
+};
 
 /* =====================================================================
    PDF: the same SVG sheet, scaled onto A3 landscape as vectors
