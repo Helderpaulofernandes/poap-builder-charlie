@@ -1879,7 +1879,21 @@ function syncContainers(p, opts = {}) {
       const grow = c.span - before, from = c.row + before, own = new Set(descendants(p, c).map(k => k.id));
       // an umbrella inside a box pushes only the box's other contents; the box then grows and pushes what's below it
       const outer = c.parent && byId.get(c.parent), within = outer ? new Set(descendants(p, outer).map(k => k.id)) : null;
-      p.items.forEach(i => { if (i !== c && !own.has(i.id) && (!within || within.has(i.id)) && i.lane === c.lane && !isCurtain(p, i.style) && i.row >= from) i.row += grow; });
+      // only what's underneath it moves: things whose dates overlap it, each summary with everything in it as one block.
+      // Umbrellas and bars beside it on the same rows (at other dates) stay where they are.
+      const top = i => { let r = i; for (let n = 0; n < 3 && r.parent; n++) { const q = byId.get(r.parent); if (!q || q === outer) break; r = q; } return r; };
+      const s0 = toDays(c.start), e0 = toDays(c.end);
+      const under = i => toDays(i.end) >= s0 && toDays(i.start) <= e0;
+      const moving = new Set();
+      p.items.forEach(i => {
+        if (i === c || own.has(i.id) || (within && !within.has(i.id)) || i.lane !== c.lane || isCurtain(p, i.style) || i.row < from) return;
+        const t = top(i);
+        if (t === c || own.has(t.id)) return;
+        if (under(t)) moving.add(i);
+      });
+      // a block that moves takes all of it along (stages above the line included), so it stays in one piece
+      const blocks = new Set([...moving].map(top));
+      p.items.forEach(i => { if (i !== c && !own.has(i.id) && i.lane === c.lane && !isCurtain(p, i.style) && (moving.has(i) || (blocks.has(top(i)) && top(i).row >= from))) i.row += grow; });
     }
     if (c.fitChildren !== false && kids.length) {
       c.start = fromDays(Math.min(...kids.map(i => toDays(i.start)))); c.end = fromDays(Math.max(...kids.map(i => toDays(i.end))));

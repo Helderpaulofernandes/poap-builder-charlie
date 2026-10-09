@@ -633,6 +633,27 @@ const TESTS = {
     T.eq([T.item("S1").row, T.item("S1").parent, T.item("U").span], [3, "U", 3], "one row down, still in its umbrella, which grows");
     T.eq([T.item("V").row, T.item("S2").row, T.item("Y").row], [4, 5, 7], "what's below moves down once");
   },
+  "An umbrella that grows moves only what's under it, not umbrellas beside it": () => {
+    const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-12-31" }; ensureSummaryStyles(p); const l = newLane(p, "Works");
+    const add = o => p.items.push({ lane: l.id, status: "Active", fill: "", stroke: "", ...o });
+    add({ id: "U", name: "Left umbrella", style: "U_CONSTRUCT", start: "2027-02-01", end: "2027-06-30", row: 0, span: 3 });
+    add({ id: "U1", name: "U stage 1", style: "BAR", start: "2027-02-01", end: "2027-03-30", row: 1, parent: "U" });
+    add({ id: "U2", name: "U stage 2", style: "BAR", start: "2027-04-01", end: "2027-06-30", row: 2, parent: "U" });
+    add({ id: "W", name: "Right umbrella", style: "U_CONSTRUCT", start: "2027-08-01", end: "2027-12-15", row: 0, span: 3 });
+    add({ id: "W1", name: "W stage 1", style: "BAR", start: "2027-08-01", end: "2027-09-30", row: 1, parent: "W" });
+    add({ id: "W2", name: "W stage 2", style: "BAR", start: "2027-10-01", end: "2027-12-15", row: 2, parent: "W" });
+    add({ id: "Y", name: "Under the left one", style: "BAR", start: "2027-03-01", end: "2027-05-30", row: 3 });
+    add({ id: "Z", name: "Under the right one", style: "BAR", start: "2027-09-01", end: "2027-10-30", row: 3 });
+    loadDoc(p, null);
+    const r = document.getElementById("chart").getBoundingClientRect(), k = r.width / LAY.W, at = (x, y) => ({ clientX: r.x + x * k, clientY: r.y + y * k, bubbles: true });
+    const x0 = LAY.x("2027-04-10"), y0 = rowCenter(T.item("U2"));
+    document.querySelector('#chart [data-id="U2"][data-part="body"]').dispatchEvent(new PointerEvent("pointerdown", at(x0, y0)));
+    for (let d = 1; d <= 20; d++) window.dispatchEvent(new PointerEvent("pointermove", at(x0, y0 + d * LAY.rowH / 20)));
+    window.dispatchEvent(new PointerEvent("pointerup", at(x0, y0 + LAY.rowH)));
+    T.eq([T.item("U2").row, T.item("U").span], [3, 4], "the stage moved a row down and its umbrella grew");
+    T.eq(T.item("Y").row, 4, "the bar under it moved down");
+    T.eq([T.item("W").row, T.item("W").span, T.item("W1").row, T.item("W2").row, T.item("Z").row], [0, 3, 1, 2, 3], "the umbrella beside it, and the bar under that, stay put");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));
