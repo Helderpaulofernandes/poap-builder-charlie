@@ -355,6 +355,29 @@ const TESTS = {
     const c = document.getElementById("tagText"); c.value = "#123456"; c.dispatchEvent(new Event("change"));
     T.eq(label().getAttribute("fill"), "#123456", "colour");
   },
+  "Summary titles: position, size, weight and colour": () => {
+    const M = p6Model(parseXer(T.xer())), rec = p6SuggestSummary(M);
+    rec["C"] = "group"; rec["C.A"] = "umbrella"; rec["C.B"] = "umbrella";
+    loadDoc(p6MakeProject(M, rec, "T-100 OPTION A.xer").p, null);
+    const text = name => [...document.querySelectorAll("#chart text")].find(t => t.textContent === name);
+    const press = (k, v) => document.querySelector(`#side [data-tset="${k}"][data-val="${v}"]`).click();
+    // an umbrella: centred by default, then right, large, regular, coloured
+    sel = { type: "item", id: "WBS C.A" }; render(); renderSide();
+    const u = T.item("WBS C.A"), ux2 = LAY.x(u.end) + LAY.ppd;
+    T.eq(text(u.name).getAttribute("text-anchor"), "middle", "umbrella: centred by default");
+    press("titleAlign", "right"); press("titleWeight", "regular");
+    T.eq([text(u.name).getAttribute("text-anchor"), +text(u.name).getAttribute("x"), text(u.name).getAttribute("font-weight")], ["end", ux2 - 6, "500"], "right and regular");
+    const col = document.getElementById("cTitleCol"); col.value = "#AA0000"; col.dispatchEvent(new Event("change"));
+    T.eq(text(u.name).getAttribute("fill"), "#AA0000", "colour");
+    // the box: left by default, then centre and large
+    sel = { type: "item", id: "WBS C" }; render(); renderSide();
+    const fs0 = +text("Construction").getAttribute("font-size");
+    press("titleAlign", "centre"); press("titleSize", "L");
+    const t = text("Construction"), b = T.item("WBS C"), x1 = LAY.x(b.start), x2 = LAY.x(b.end) + LAY.ppd, tx = +t.getAttribute("x");
+    T.ok(+t.getAttribute("font-size") > fs0 && tx > x1 + 20 && tx < (x1 + x2) / 2, "box title centred and larger");
+    document.getElementById("cTitleReset").click();
+    T.eq([b.titleAlign, T.item("WBS C").titleSize], [undefined, undefined], "Default title clears it");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));

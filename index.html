@@ -1497,10 +1497,11 @@ function planLabels(L) {
     }
     // summary titles: to the left of the bracket when there's room, otherwise to its right
     for (const c of containers) {
-      const x1 = L.x(c.start), x2 = L.x(c.end) + L.ppd, tw = textW(c.name, 8.5, 700) + (L.print ? 0 : 12);
+      const tf = titleFmt(P, c), x1 = L.x(c.start), x2 = L.x(c.end) + L.ppd, tw = textW(c.name, 8.5 * tf.scale, tf.weight) + (L.print ? 0 : 12);
       if (styleOf(P, c.style).shape === "container-box" || isUmbrella(P, c)) { take(occ, c.row, x1, x2); out.set(c.id, { titleSide: "inside" }); continue; }
+      if (tf.align === "centre") { take(occ, c.row, x1, x2); out.set(c.id, { titleSide: "centre" }); continue; }
       const leftEdge = Math.max(G.headW + 4, ...(occ.get(c.row) || []).filter(([, b]) => b <= x1 + 1).map(([, b]) => b + 4));
-      const side = x1 - 7 - tw >= leftEdge && free(occ, c.row, x1 - 7 - tw, x1) ? "left" : "right";
+      const side = tf.align === "left" || tf.align === "right" ? tf.align : x1 - 7 - tw >= leftEdge && free(occ, c.row, x1 - 7 - tw, x1) ? "left" : "right";
       take(occ, c.row, x1, x2);
       if (side === "left") take(occ, c.row, x1 - 7 - tw, x1); else take(occ, c.row, x2, x2 + 7 + tw);
       out.set(c.id, { titleSide: side });
@@ -1584,14 +1585,18 @@ function drawContainer(g, it, ln, L, opts, F) {
   // collapsed: the group's milestones roll up onto the bracket
   if (!open) kids.filter(k => isMs(P, k.style)).forEach(k => { const ks = styleOf(P, k.style), c = itemColours(k, ln.l); drawMarker(grp, ks.shape, L.x(k.start) + L.ppd / 2, cy, G.ms * .8, c.fill, c.stroke); });
   // title (with an open/closed arrow on screen); a box keeps its title inside, top-left
-  const chev = opts.print ? 0 : 12, tw = textW(it.name, 8.5, 700);
-  const tx = box ? x1 + 5 : titleSide === "left" ? x1 - 7 - tw - chev : x2 + 7;
+  const tf = titleFmt(P, it), fs = 8.5 * tf.scale, title = it.name + (it.collapsed && !opts.print ? `  (${kids.length})` : "");
+  const chev = opts.print ? 0 : 12, tw = textW(title, fs, tf.weight);
+  // where the text starts: a box keeps it inside its header row; a bracket puts it beside (or centred on) the bracket
+  const tx = box ? (tf.align === "centre" ? x1 + (w - tw) / 2 - chev : tf.align === "right" ? x2 - 5 - tw - chev : x1 + 5)
+    : titleSide === "centre" ? x1 + (w - tw) / 2 - chev : titleSide === "left" ? x1 - 7 - tw - chev : x2 + 7;
   if (!opts.print) {
     const cx = tx + 4, cyc = cy;
     el("polygon", { points: open ? `${cx - 3.5},${cyc - 2} ${cx + 3.5},${cyc - 2} ${cx},${cyc + 2.5}` : `${cx - 2},${cyc - 3.5} ${cx + 2.5},${cyc} ${cx - 2},${cyc + 3.5}`, fill: stroke, "pointer-events": "none" }, grp);
     el("rect", { x: tx - 2, y: cy - 7, width: chev + 1, height: 14, fill: "transparent", "data-id": it.id, "data-part": "toggle", style: "cursor:pointer" }, grp);
   }
-  el("text", { x: tx + chev, y: cy + 3.1, fill: BRAND.navy, "font-size": 8.5, "font-weight": 700, "font-family": F.font, "pointer-events": "none" }, grp, it.name + (it.collapsed && !opts.print ? `  (${kids.length})` : ""));
+  const halo = !box && titleSide === "centre" ? { stroke: "#FFFFFF", "stroke-width": 3, "paint-order": "stroke" } : {};   // centred on the bracket: a white edge keeps it readable
+  el("text", { x: tx + chev, y: cy + fs * .36, fill: tf.colour || BRAND.navy, "font-size": fs, "font-weight": tf.weight, "font-family": F.font, "pointer-events": "none", ...halo }, grp, title);
   if (selected) el("rect", { x: x1 - 2, y: top - 1, width: w + 4, height: bottom - top + 2, fill: "none", stroke: BRAND.orange, "stroke-width": 1.6, "pointer-events": "none" }, grp);
   if (!opts.print) {   // grab the bracket row or title to move the group; edges change dates
     el("rect", { x: x1, y: top, width: w, height: G.rowH, fill: "transparent", "data-id": it.id, "data-part": "body", style: "cursor:grab" }, grp);
@@ -1622,9 +1627,12 @@ function drawUmbrella(g, it, ln, L, opts, F) {
   const grp = el("g", { "data-id": it.id }, g);
   const h = Math.max(10, G.rowH - 3), y = top + (G.rowH - h) / 2;
   el("rect", { x: x1, y, width: w, height: h, fill: col, stroke, "stroke-width": .8, "pointer-events": "none" }, grp);
-  let size = Math.min(15, h * .8); const title = it.name + (it.collapsed && !opts.print ? `  (${kids.length})` : "");
-  while (size > 7 && textW(title, size, 700) > w - 8) size -= .5;
-  el("text", { x: x1 + w / 2, y: y + h / 2 + size * .36, "text-anchor": "middle", fill: textOn(col), "font-size": size, "font-weight": 700, "font-family": F.font, "pointer-events": "none" }, grp, title);
+  const tf = titleFmt(P, it), room = tf.align === "centre" ? w - 8 : w - 22;
+  let size = { S: Math.min(11, h * .62), M: Math.min(15, h * .8), L: Math.min(18, h * .98) }[tf.size] || Math.min(15, h * .8);
+  const title = it.name + (it.collapsed && !opts.print ? `  (${kids.length})` : "");
+  while (size > 6 && textW(title, size, tf.weight) > room) size -= .5;
+  const at = tf.align === "left" ? ["start", x1 + 16] : tf.align === "right" ? ["end", x2 - 6] : ["middle", x1 + w / 2];
+  el("text", { x: at[1], y: y + h / 2 + size * .36, "text-anchor": at[0], fill: tf.colour || textOn(col), "font-size": size, "font-weight": tf.weight, "font-family": F.font, "pointer-events": "none" }, grp, title);
   if (!open) kids.filter(k => isMs(P, k.style) || isShape(P, k, "tile")).forEach(k => { const c = itemColours(k, ln.l); if (isMs(P, k.style)) drawMarker(grp, styleOf(P, k.style).shape, L.x(k.start) + L.ppd / 2, y + h / 2, G.ms * .7, c.fill, c.stroke); });
   if (selected) el("rect", { x: x1 - 2, y: top - 1, width: w + 4, height: bottom - top + 2, fill: "none", stroke: BRAND.orange, "stroke-width": 1.6, "pointer-events": "none" }, grp);
   if (!opts.print) {
@@ -1753,6 +1761,12 @@ const BAR_SHAPES = [["bar","Plain bar"],["rounded","Rounded bar"],["poss","Hatch
    own row to its lowest bar), and its dates follow them unless "dates follow" is switched off. A collapsed
    summary shows as one row: its bars are hidden and its milestones are drawn on the bracket. */
 function isContainer(p, it) { return /^container/.test(styleOf(p, it.style).shape); }
+/* a summary's title: where it sits (bracket: auto picks a side with room; box: left; umbrella: centre), size, weight, colour */
+const TITLE_SCALE = { S: .85, M: 1, L: 1.25 };
+function titleFmt(p, it) {
+  const sh = styleOf(p, it.style).shape, def = sh === "container-umbrella" ? "centre" : sh === "container-box" ? "left" : "auto";
+  return { align: it.titleAlign || def, def, scale: TITLE_SCALE[it.titleSize] || 1, size: it.titleSize || "M", weight: it.titleWeight === "regular" ? 500 : 700, bold: it.titleWeight !== "regular", colour: it.titleColour || "" };
+}
 function spanOf(it) { return Math.max(1, +it.span || 2); }
 function containerChildren(p, c) { return p.items.filter(i => i !== c && i.parent === c.id); }
 /* one level of nesting: a summary bar or box can hold umbrella rows (each with its own stages); umbrellas hold no summaries */
@@ -2941,9 +2955,16 @@ function itemExtras(cur) {
   if (isMs(P, cur.style)) return groupPick;
   if (isContainer(P, cur)) {
     const kids = containerChildren(P, cur), box = styleOf(P, cur.style).shape === "container-box";
-    return `${groupPick}<div class="tagfmt">
+    const tf = titleFmt(P, cur), tseg = (key, label, opts, val) => `<div class="f"><label>${label}</label><div class="seg" role="group" aria-label="${label}">${opts.map(([v, n]) => `<button type="button" data-tset="${key}" data-val="${v}" aria-pressed="${val === v}">${n}</button>`).join("")}</div></div>`;
+    const titleCtl = `<div class="tagfmt">
+      ${tseg("titleAlign", "Title position", [...(tf.def === "auto" ? [["auto", "Auto"]] : []), ["left", "Left"], ["centre", "Centre"], ["right", "Right"]], tf.align)}
+      <div class="row2">${tseg("titleSize", "Title size", [["S", "S"], ["M", "M"], ["L", "L"]], tf.size)}${tseg("titleWeight", "Weight", [["bold", "Bold"], ["regular", "Regular"]], tf.bold ? "bold" : "regular")}</div>
+      <div class="f"><label for="cTitleCol">Title colour</label><input id="cTitleCol" type="color" value="${tf.colour || (isUmbrella(P, cur) ? textOn(umbrellaColour(cur, P.lanes.find(l => l.id === cur.lane) || null)) : BRAND.navy)}"></div>
+      ${cur.titleAlign || cur.titleSize || cur.titleWeight || cur.titleColour ? `<p class="note"><a href="#" id="cTitleReset">Default title</a></p>` : ""}
+    </div>`;
+    return `${groupPick}${titleCtl}<div class="tagfmt">
       <div class="actions"><button class="btn primary" id="cCollapse">${cur.collapsed ? "Expand" : "Collapse"}</button><span class="note">${kids.length} item${kids.length === 1 ? "" : "s"} inside${cur.collapsed ? ", hidden" : ""}</span></div>
-      <div class="f"><label>Look</label><div class="seg" role="group" aria-label="Summary look"><button type="button" data-look="container" aria-pressed="${!box}">Bracket</button><button type="button" data-look="container-box" aria-pressed="${box}">Box</button></div></div>
+      <div class="f"><label>Look</label><div class="seg" role="group" aria-label="Summary look">${[["container", "Bracket"], ["container-box", "Box"], ...(P.styles.some(s => s.shape === "container-umbrella") ? [["container-umbrella", "Umbrella"]] : [])].map(([v, n]) => `<button type="button" data-look="${v}" aria-pressed="${styleOf(P, cur.style).shape === v}">${n}</button>`).join("")}</div></div>
       <div class="f"><label>Activities in this summary</label><div class="actions"><button class="btn" id="cGrow" ${cur.collapsed ? "disabled" : ""}>+ Include the row below</button><button class="btn" id="cShrink" ${cur.collapsed || !kids.length ? "disabled" : ""}>− Release the bottom row</button></div></div>
       <p class="note">Or drag the summary's bottom edge down over the activities to take them in, and up to let them go.</p>
       <label class="check"><input type="checkbox" id="cFit" ${cur.fitChildren !== false ? "checked" : ""}> Dates follow the bars inside</label>
@@ -2969,6 +2990,11 @@ function bindItemExtras(cur) {
     x.row = 999; x.row = groupFreeRow(P, g, x);
   });
   if ($("cCollapse")) $("cCollapse").onclick = () => upd(x => { x.collapsed = !x.collapsed; });
+  // a summary's title: the default value is stored as nothing, so the type's look still applies
+  const tDef = { titleAlign: titleFmt(P, cur).def, titleSize: "M", titleWeight: "bold" };
+  $("side").querySelectorAll("[data-tset]").forEach(b => b.onclick = () => upd(x => { const k = b.dataset.tset; if (b.dataset.val === tDef[k]) delete x[k]; else x[k] = b.dataset.val; }));
+  if ($("cTitleCol")) $("cTitleCol").onchange = e => upd(x => x.titleColour = e.target.value.toUpperCase());
+  if ($("cTitleReset")) $("cTitleReset").onclick = e => { e.preventDefault(); upd(x => ["titleAlign", "titleSize", "titleWeight", "titleColour"].forEach(k => delete x[k])); };
   const lastRow = x => { const k = containerChildren(P, x); return k.length ? Math.max(...k.map(i => i.row)) : x.row; };
   // the next row below that has an activity not already in a summary (blank rows are skipped)
   const nextRow = x => {
@@ -2979,6 +3005,7 @@ function bindItemExtras(cur) {
   if ($("cShrink")) $("cShrink").onclick = () => upd(x => setSummaryBottom(P, x, lastRow(x) - 1));
   if ($("cFit")) $("cFit").onchange = e => upd(x => { x.fitChildren = e.target.checked; });
   $("side").querySelectorAll("[data-look]").forEach(b => b.onclick = () => upd(x => {
+    if (styleOf(P, x.style).shape === b.dataset.look) return;
     const t = P.styles.find(s => s.shape === b.dataset.look); if (t) x.style = t.name;
   }));
 }
