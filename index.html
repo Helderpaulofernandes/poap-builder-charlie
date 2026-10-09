@@ -3898,8 +3898,9 @@ function previewImport(parsed, fname) {
   const rowLanes = new Set(parsed.rows.filter(r => r.lane && !isCurtain(lookup, styleOf(lookup, r.style).name)).map(r => key(r.lane)));
   const laneDiffs = [];
   let lanesGone = [];
-  if (sheetLanes.length && parsed.keepLook) {
-    for (const sl of sheetLanes) if (!P.lanes.some(l => key(l.name) === key(sl.name))) laneDiffs.push([sl.name, "New lane", null, sl.name]);
+  if (sheetLanes.length && parsed.keepLook) {   // only lanes something new goes into (a new item under a summary goes in that summary's lane)
+    const needed = new Set(adds.filter(r => r.lane && !(r.parent && P.items.some(i => i.id === r.parent)) && !isCurtain(lookup, styleOf(lookup, r.style).name)).map(r => key(r.lane)));
+    for (const sl of sheetLanes) if (needed.has(key(sl.name)) && !P.lanes.some(l => key(l.name) === key(sl.name))) laneDiffs.push([sl.name, "New lane", null, sl.name]);
   } else if (sheetLanes.length) {
     const inSheet = new Set(sheetLanes.map(l => key(l.name)));
     lanesGone = P.lanes.filter(l => !inSheet.has(key(l.name)) && !rowLanes.has(key(l.name)));
@@ -3974,7 +3975,7 @@ function previewImport(parsed, fname) {
         const reserved = new Set(parsed.rows.map(r => r.id).filter(Boolean));
         for (const r of [...adds, ...dupes]) rowToNewItem(p, r, { laneFor, allIds, reserved, keepLook: parsed.keepLook });
         // lanes from the Lanes sheet: create missing ones, apply colours, then put them in the sheet's order
-        if (sheetLanes.length && parsed.keepLook) sheetLanes.forEach(sl => laneFor(sl.name));   // only lanes it needs that aren't there yet
+        if (sheetLanes.length && parsed.keepLook) { /* lanes come with the new items that need them */ }
         else if (sheetLanes.length) {
           for (const sl of sheetLanes) {
             const l = p.lanes.find(x => key(x.name) === key(sl.name)) || p.lanes.find(x => x.id === laneFor(sl.name));
@@ -4545,7 +4546,8 @@ function rowToNewItem(p, r, { laneFor, allIds, reserved, keepLook }) {
   const st = styleOf(p, r.style).name;
   const id = r.id && !p.items.some(i => i.id === r.id) ? r.id : nextId(p, st, r.id || null, reserved);
   const curtain = isCurtain(p, st);
-  const it = { id, name: r.name, style: st, lane: curtain ? "" : laneFor(r.lane || "Unassigned"), start: r.start, end: isMs(p, st) ? r.start : r.end, status: r.status, row: 0, fill: r.fill, stroke: r.stroke };
+  const home = !curtain && r.parent && p.items.find(i => i.id === r.parent);   // under a summary: in that summary's lane, whatever it's called now
+  const it = { id, name: r.name, style: st, lane: curtain ? "" : home ? home.lane : laneFor(r.lane || "Unassigned"), start: r.start, end: isMs(p, st) ? r.start : r.end, status: r.status, row: 0, fill: r.fill, stroke: r.stroke };
   if (r.parent) it.parent = r.parent;
   if (r.collapsed) it.collapsed = true;
   if (!curtain && r.pct) it.pct = r.pct;
@@ -4675,6 +4677,11 @@ function openP6Builder(M, rec, fname, mode, from = null) {
   const showKids = w => ["lane", "split", "group"].includes(rec[w.path] || "hide");
   // ---- an update reads the programme first: what's on the sheet, what was removed from it, what this XER changes ----
   const sheetIds = new Set(P.items.map(i => i.id)), knownIds = new Set((update && P.p6 && P.p6.ids) || []);
+  // programmes from before the import kept that record: what the saved choices made last time, built from this file,
+  // is what came in then (so what isn't on the sheet any more was removed there); parts the choices never covered stay new
+  if (update && !knownIds.size && P.p6 && P.p6.recipe) {
+    try { const r0 = { ...P.p6.recipe }; ((r0["~style"] || "detailed") === "summary" ? p6BuildSummary(M, r0) : p6Build(M, r0)).rows.forEach(r => knownIds.add(r.id)); } catch (e) { console.warn(e); }
+  }
   const revive = new Set(), removedNodes = new Map(), removedMs = new Set();   // brought back by hand / parts and milestones removed on the sheet
   let A = null, filter = "";   // the latest analysis; the changes line's filter
   const pathOf = id => { const x = /^(?:WBS|ZONE) (\S+)/.exec(id); return x ? x[1] : null; };
@@ -4687,7 +4694,7 @@ function openP6Builder(M, rec, fname, mode, from = null) {
     rows.forEach(r => { const i = byIdP.get(r.id); if (i && isContainer(P, i) && i.fitChildren !== false) { r.start = i.start; r.end = i.end; } });
     const fresh = new Set(rows.filter(r => !byIdP.has(r.id)).map(r => r.id));
     // (a summary's dates follow what's inside it: its own aren't a change, what's inside moving is)
-    const moved = new Set(rows.filter(r => { const i = byIdP.get(r.id); return i && !isCurtain(P, i.style) && !(isContainer(P, i) && i.fitChildren !== false) && (i.start !== r.start || (!isMs(P, i.style) && i.end !== r.end)); }).map(r => r.id));
+    const moved = new Set(rows.filter(r => { const i = byIdP.get(r.id); return i && !(isContainer(P, i) && i.fitChildren !== false) && (i.start !== r.start || (!isMs(P, i.style) && !isShape(P, i, "gate") && i.end !== r.end)); }).map(r => r.id));
     const builtIds = new Set(built.rows.map(r => r.id));
     const leaving = new Set(P.items.filter(i => known.has(i.id) && !builtIds.has(i.id)).map(i => i.id));
     // per WBS part, and rolled up to its parents for the filter

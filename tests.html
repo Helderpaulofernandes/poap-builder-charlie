@@ -532,6 +532,20 @@ const TESTS = {
     T.ok(yTop < y0 && y0 < yBot, "top, middle and bottom of the shade");
     press("tagSize", "L"); T.ok(+text("Shutdown").getAttribute("font-size") > 9, "size");
   },
+  "An older programme (no record of what came from P6) still keeps its deletions": async () => {
+    await importP6(new File([T.xer()], "T-100 OPTION A.xer"), "new");
+    let m = document.querySelector(".modal"); const set = (path, v) => { const x = m.querySelector(`[data-mode="${path}"]`); x.value = v; x.dispatchEvent(new Event("change", { bubbles: true })); };
+    set("C", "lane"); set("C.A", "umbrella"); set("C.B", "umbrella");
+    m.querySelector("[data-act=go]").click(); await new Promise(r => setTimeout(r, 150)); T.clean();
+    delete P.p6.ids;   // as programmes saved before the record was kept
+    const b = T.item("WBS C.B"), aStage = containerChildren(P, T.item("WBS C.A"))[0];
+    deleteItems([b.id, ...descendants(P, b).map(k => k.id), aStage.id]);
+    await document.getElementById("bP6Edit").onclick(); m = document.querySelector(".modal");
+    T.ok(/removed on the sheet/.test(m.querySelector("#p6Chg").innerText), "the deletions are seen");
+    m.querySelector("[data-act=go]").click();
+    const pv = document.querySelector(".modal");
+    T.ok(/0 new/.test(pv.querySelector(".chips").innerText), "and nothing comes back");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));
