@@ -493,6 +493,45 @@ const TESTS = {
     m.querySelector("[data-act=go]").click(); pv = document.querySelector(".modal");
     T.ok(/1 new/.test(pv.querySelector(".chips").innerText), "and the review adds it");
   },
+  "Any type can be shown in the legend, phase bands and zones too": () => {
+    const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
+    const l = newLane(p, "Works"); p.items.push({ id: "B", name: "B", style: "BAR", lane: l.id, start: "2027-02-01", end: "2027-03-01", status: "Active", row: 0, fill: "", stroke: "" });
+    p.styles.find(s => s.name === "ZONE_TC").notes = "Events";
+    p.items.push({ id: "Z", name: "Possession weekend", style: "ZONE_TC", lane: "", start: "2027-04-01", end: "2027-04-20", status: "Active", row: 0, fill: "", stroke: "" });
+    p.items.push({ id: "E", name: "Event", style: "BAND_OPEN", lane: "", start: "2027-01-01", end: "2027-02-01", status: "Active", row: 0, fill: "", stroke: "" });
+    loadDoc(p, null);
+    const inLegend = name => { const plan = footerPlan(LAY, LAY.labels.keyList); return plan.entries.some(e => e.kind === "style" && (e.s.notes || e.s.name) === name); };
+    T.eq([inLegend("Events"), inLegend("Phase: open")], [false, false], "zones and bands start out of the legend");
+    sel = { type: "style", id: "ZONE_TC" }; render(); renderSide();
+    const c = document.getElementById("sLegend"); T.ok(c && !c.checked, "the type says so");
+    c.checked = true; c.dispatchEvent(new Event("change"));
+    sel = { type: "style", id: "BAND_OPEN" }; render(); renderSide();
+    const c2 = document.getElementById("sLegend"); c2.checked = true; c2.dispatchEvent(new Event("change"));
+    T.eq([inLegend("Events"), inLegend("Phase: open")], [true, true], "switched on, both are listed");
+    T.ok([...document.querySelectorAll("#chart text")].some(t => t.textContent === "Events"), "and drawn in the footer");
+  },
+  "A phase band's and a zone's label follow their tag settings": () => {
+    const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-12-31" }; ensureSummaryStyles(p);
+    const l = newLane(p, "Works"); for (let k = 0; k < 6; k++) p.items.push({ id: "B" + k, name: "B" + k, style: "BAR", lane: l.id, start: "2027-02-01", end: "2027-03-01", status: "Active", row: k, fill: "", stroke: "" });
+    p.items.push({ id: "E", name: "Events", style: "BAND_OPEN", lane: "", start: "2027-01-01", end: "2027-06-30", status: "Active", row: 0, fill: "", stroke: "" });
+    p.items.push({ id: "Z", name: "Shutdown", style: "ZONE_TC", lane: "", start: "2027-08-01", end: "2027-09-30", status: "Active", row: 0, fill: "", stroke: "" });
+    loadDoc(p, null);
+    const text = n => [...document.querySelectorAll("#chart text")].find(t => t.textContent === n);
+    const press = (k, v) => document.querySelector(`#side [data-tag="${k}"][data-val="${v}"]`).click();
+    T.eq(text("Events").getAttribute("text-anchor"), "middle", "a band's label is centred by default");
+    sel = { type: "item", id: "E" }; render(); renderSide();
+    T.ok(!document.querySelector('#side [data-tag="tagPos"]') && /Label in the band/i.test(document.getElementById("side").innerText), "band: only what applies");
+    press("tagAlign", "right"); press("tagSize", "S");
+    T.eq([text("Events").getAttribute("text-anchor"), text("Events").getAttribute("font-size")], ["end", "11"], "right, small");
+    const c = document.getElementById("tagText"); c.value = "#112233"; c.dispatchEvent(new Event("change"));
+    T.eq(text("Events").getAttribute("fill"), "#112233", "colour");
+    // the zone: top / middle / bottom along the shade
+    const mid = () => { const g = text("Shutdown").parentNode.getAttribute("transform"); return +/rotate\(-90 [\d.]+ ([\d.]+)\)/.exec(g)[1]; };
+    const y0 = mid(); sel = { type: "item", id: "Z" }; render(); renderSide();
+    press("tagAlign", "left"); const yTop = mid(); press("tagAlign", "right"); const yBot = mid();
+    T.ok(yTop < y0 && y0 < yBot, "top, middle and bottom of the shade");
+    press("tagSize", "L"); T.ok(+text("Shutdown").getAttribute("font-size") > 9, "size");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));

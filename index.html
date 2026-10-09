@@ -1243,10 +1243,13 @@ function drawCurtainShades(svg, curtains, L, opts = {}, F = { font: sheetFace() 
     }
     if (st.shape !== "solid") for (const x of [x1, x2]) el("line", { x1: x, x2: x, y1, y2: y1 + h, stroke, "stroke-width": 1.1, "stroke-dasharray": "5 3" }, g);
     if (kind === "zone") {   // a zone names itself in large upright letters (with an optional second line)
-      const cx = (x1 + x2) / 2, cy = y1 + h / 2, room = h - 24, sub = it.sub || "";
-      let size = Math.max(9, Math.min(26, w * (sub ? .32 : .48)));
+      // the tag settings: size (S/M/L), where along the shade (top / middle / bottom), colour
+      const tf = tagFmt(it, st), al = it.tagAlign ?? st.tagAlign ?? "centre", room = h - 24, sub = it.sub || "";
+      let size = Math.max(9, Math.min(26, w * (sub ? .32 : .48))) * ({ S: .75, M: 1, L: 1.3 }[tf.tagSize] || 1);
       while (size > 8 && textW(it.name, size, 700) > room) size -= .5;
       let ss = size * .62; while (ss > 7 && textW(sub, ss, 500) > room) ss -= .5;
+      const lw0 = Math.max(textW(it.name, size, 700), textW(sub, ss, 500));
+      const cx = (x1 + x2) / 2, cy = al === "left" ? y1 + 12 + lw0 / 2 : al === "right" ? y1 + h - 12 - lw0 / 2 : y1 + h / 2;
       // the tag's text colour when one is set, else whatever reads on the shade
       const ink = tagFmt(it, st).tagText || textOn(fill), tg = el("g", { transform: `rotate(-90 ${cx} ${cy})` }, g);
       const dy = sub ? -ss * .55 : 0;
@@ -1272,8 +1275,11 @@ function drawPhaseBands(svg, L, F, opts) {
     if (w <= 0) continue;
     const grp = el("g", { "data-id": it.id, style: opts.print ? null : "cursor:grab" }, g);
     el("rect", { x: x1, y, width: w, height: h, fill, "data-id": it.id, "data-part": "body" }, grp);
-    let size = 14; while (size > 7 && textW(it.name, size, 700) > w - 8) size -= .5;
-    el("text", { x: x1 + w / 2, y: y + h / 2 + size * .36, "text-anchor": "middle", fill: textOn(fill), "font-size": size, "font-weight": 700, "font-family": F.font, "pointer-events": "none" }, grp, it.name);
+    // the tag settings: left / centre / right in the band, size (S/M/L), text colour
+    const st = styleOf(P, it.style), tf = tagFmt(it, st), al = it.tagAlign ?? st.tagAlign ?? "centre";
+    let size = { S: 11, M: 14, L: 17 }[tf.tagSize] || 14; size = Math.min(size, h * .95); while (size > 7 && textW(it.name, size, 700) > w - 8) size -= .5;
+    const at = al === "left" ? ["start", x1 + 6] : al === "right" ? ["end", x2 - 6] : ["middle", x1 + w / 2];
+    el("text", { x: at[1], y: y + h / 2 + size * .36, "text-anchor": at[0], fill: tf.tagText || textOn(fill), "font-size": size, "font-weight": 700, "font-family": F.font, "pointer-events": "none" }, grp, it.name);
     if (!opts.print) {
       el("rect", { x: x1 - 3, y, width: 6, height: h, fill: "transparent", "data-id": it.id, "data-part": "l", style: "cursor:ew-resize" }, grp);
       el("rect", { x: x2 - 3, y, width: 6, height: h, fill: "transparent", "data-id": it.id, "data-part": "r", style: "cursor:ew-resize" }, grp);
@@ -1338,8 +1344,8 @@ function footerPlan(L, keyList) {
   const headW = Math.max(textW("Legend:", 11, 700), textW("Key:", 11, 700)) + 14, indent = left + headW;
   const entries = [{ kind: "heading", text: "Legend:", w: headW }];
   // milestone types, curtains, and bar types with their own colour (lane-coloured bars need no key)
-  // (gates, phase bands and zones name themselves on the sheet, so they stay out of the legend)
-  P.styles.filter(s => (s.behaviour !== "Stretch" || s.fill) && s.legend !== false && !["gate", "band"].includes(s.shape) && P.items.some(i => i.style === s.name))
+  // (each type's "Show in the legend"; gates, phase bands and zones start without, as they name themselves on the sheet)
+  P.styles.filter(s => (s.behaviour !== "Stretch" || s.fill) && s.legend !== false && P.items.some(i => i.style === s.name))
     .forEach(s => { const icon = s.behaviour === "Move" ? 18 : 28; entries.push({ kind: "style", s, icon, w: icon + textW(s.notes || s.name, 9.5, 500) + 22 }); });
   // progress symbols, when shown
   const pr = prog(), extra = (what, label) => entries.push({ kind: "extra", what, label, icon: 28, w: 28 + textW(label, 9.5, 500) + 22 });
@@ -1397,6 +1403,8 @@ function drawFooter(svg, L, F) {
     }
     const s = e.s;
     if (s.behaviour === "Move") drawMarker(g, s.shape, x + 6, cy, 13, s.fill, s.stroke);
+    else if (s.shape === "gate") el("line", { x1: x + 11, x2: x + 11, y1: cy - 8, y2: cy + 8, stroke: s.fill || LINE_RED, "stroke-width": 2.2 }, g);
+    else if (s.shape === "band") el("rect", { x, y: cy - 6, width: 22, height: 12, fill: s.fill, stroke: s.stroke || s.fill, "stroke-width": .6 }, g);
     else if (s.behaviour === "Curtain") { el("rect", { x, y: cy - 6, width: 22, height: 12, fill: s.fill, "fill-opacity": Math.max(.25, s.opacity ?? .18), stroke: s.stroke, "stroke-dasharray": s.shape === "solid" ? null : "3 2" }, g); }
     else drawBarShape(g, s.shape, x, cy - 6, 22, 12, s.fill || laneBar(BRAND.navy), s.stroke);
     el("text", { x: x + e.icon, y: cy + 3.5, fill: BRAND.ink, "font-size": 9.5, "font-weight": 500, "font-family": F.font }, g, s.notes || s.name);
@@ -3091,6 +3099,21 @@ function tagControls(f, kind) {
   const seg = (key, label, names) => `<div class="f"><label>${label}</label><div class="seg" role="group" aria-label="${label}">${TAG_CHOICES[key].map(([v, n]) =>
     `<button type="button" data-tag="${key}" data-val="${v}" aria-pressed="${f[key] === v}">${names ? names[v] : n}</button>`).join("")}</div></div>`;
   // a key-date line: its name runs up beside the line, at the top, middle or bottom of it
+  // a phase band or a large upright zone: its name sits in the shade; where, how big, what colour (default centred)
+  const segAt = (label, names, val) => `<div class="f"><label>${label}</label><div class="seg" role="group" aria-label="${label}">${TAG_CHOICES.tagAlign.map(([v]) =>
+    `<button type="button" data-tag="tagAlign" data-val="${v}" aria-pressed="${val === v}">${names[v]}</button>`).join("")}</div></div>`;
+  const colour = (auto, autoLabel) => `<div class="f"><label for="tagText">Label colour</label><input id="tagText" type="color" value="${f.tagText || auto}"></div>
+    ${f.tagText ? `<p class="note"><a href="#" id="tagAuto">${autoLabel}</a></p>` : ""}`;
+  if (kind === "band") return `<div class="tagfmt">
+    <div class="row2">${segAt("Label in the band", { left: "Left", centre: "Centre", right: "Right" }, f.rawAlign || "centre")}${seg("tagSize", "Label size")}</div>
+    ${colour(f.autoText, "Automatic colour")}
+  </div>`;
+  if (kind === "zone") return `<div class="tagfmt">
+    ${seg("tagPos", "Tag position")}
+    <p class="note">Large, upright names the shade itself; the other positions give it a tag like other curtains.</p>
+    <div class="row2">${segAt("Label along the shade", { left: "Top", centre: "Middle", right: "Bottom" }, f.rawAlign || "centre")}${seg("tagSize", "Label size")}</div>
+    ${colour(f.autoText, "Automatic colour")}
+  </div>`;
   if (kind === "gate") return `<div class="tagfmt">
     <div class="row2">${seg("tagAlign", "Label along the line", { left: "Top", centre: "Middle", right: "Bottom" })}${seg("tagSize", "Label size")}</div>
     <div class="f"><label for="tagText">Label colour</label><input id="tagText" type="color" value="${f.tagText || f.lineColour}"></div>
@@ -3161,7 +3184,7 @@ function renderCurtainSide(side, cur) {
       <div class="f"><label for="cStroke">Tag &amp; edges</label><input id="cStroke" type="color" value="${stroke}"></div>
     </div>
     ${coverControls(cur)}
-    ${tagControls({ ...tagFmt(cur, st), lineColour: fill }, curtainKind(P, cur))}
+    ${tagControls({ ...tagFmt(cur, st), lineColour: fill, rawAlign: cur.tagAlign ?? st.tagAlign, autoText: textOn(fill) }, curtainKind(P, cur))}
     <p class="note">${cur.fill || cur.stroke || cur.opacity != null || TAG_KEYS.some(k => cur[k] != null) ? `Custom look for this curtain · <a href="#" id="cReset">use the type's</a>` : `Uses the “${esc(st.notes)}” type's colours, shading and tag format.`}</p>
     <div class="f"><label for="cId">ShapeID</label><input id="cId" value="${esc(cur.id)}"></div>
     <div class="actions"><button class="btn" id="cDup">Duplicate</button><button class="btn danger" id="cDel">Delete</button></div>
@@ -3220,9 +3243,11 @@ function renderTypeSide(side, s) {
     <div class="f"><label for="sLabel">Name (shown in legend${curtain ? " and as the default tag" : ""})</label><input id="sLabel" value="${esc(s.notes)}"></div>
     <div class="f"><label for="sShape">${curtain ? "Shading" : "Shape"}</label><select id="sShape">${kind.shapes().map(([k, n]) => `<option value="${k}" ${k === s.shape ? "selected" : ""}>${n}</option>`).join("")}</select></div>
     ${bar ? `<label class="check"><input type="checkbox" id="sLane" ${s.fill ? "" : "checked"}> Use the lane colour</label>` : ""}
+    <label class="check" title="List this type in the legend at the foot of the sheet (when something on the sheet uses it)"><input type="checkbox" id="sLegend" ${s.legend !== false ? "checked" : ""}> Show in the legend</label>
+    ${bar && !s.fill && s.legend !== false ? `<p class="note">Bars in the lane colour are left out of the legend: give the type its own colour to list it.</p>` : ""}
     ${curtain ? `<div class="f"><label for="sOpacity">Shading: <span id="sPct">${pct}%</span></label><input id="sOpacity" type="range" min="0" max="70" step="1" value="${pct}" style="accent-color:${s.fill}"></div>
       <div class="f"><label for="sDays">Duration in the tag</label><select id="sDays">${DAYS_OPTIONS.map(([k, n]) => `<option value="${k}" ${k === (s.days || "") ? "selected" : ""}>${n}</option>`).join("")}</select></div>
-      ${tagControls({ ...tagFmt({}, s), lineColour: s.fill || BRAND.navy }, s.shape === "gate" ? "gate" : "")}
+      ${tagControls({ ...tagFmt({}, s), lineColour: s.fill || BRAND.navy, rawAlign: s.tagAlign, autoText: textOn(s.fill || "#FFFFFF") }, ["gate", "band"].includes(s.shape) ? s.shape : s.tagPos === "inside" ? "zone" : "")}
       <p class="note">These are the defaults for every curtain of this type; a curtain can override them.</p>` : ""}
     <div class="row2">
       <div class="f"><label for="sFill">${curtain ? "Shade colour" : "Fill"}</label><input id="sFill" type="color" value="${s.fill || laneBar(BRAND.orange)}" ${bar && !s.fill ? "disabled" : ""}></div>
@@ -3254,6 +3279,7 @@ function renderTypeSide(side, s) {
     sel.id = code; renderSide();
   };
   $("sShape").onchange = e => upd(x => x.shape = e.target.value);
+  $("sLegend").onchange = e => upd(x => { if (e.target.checked) delete x.legend; else x.legend = false; });
   $("sFill").onchange = e => upd(x => x.fill = e.target.value.toUpperCase());
   $("sStroke").onchange = e => upd(x => x.stroke = e.target.value.toUpperCase());
   if ($("sLane")) $("sLane").onchange = e => upd(x => x.fill = e.target.checked ? "" : (x.fill || "#B7C9A8"));
