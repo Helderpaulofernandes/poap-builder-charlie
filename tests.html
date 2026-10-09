@@ -431,6 +431,23 @@ const TESTS = {
     const pick = m.querySelector('[data-ms="AFC1"]');
     T.ok(pick && [...pick.options].map(o => o.value).join() === "off,here,key,gate", "the milestone can be picked in the tree");
   },
+  "A P6 update keeps the sheet as it is and only adds what's new": async () => {
+    const M = p6Model(parseXer(T.xer())), rec = p6SuggestSummary(M);
+    rec["C"] = "lane"; rec["C.A"] = "umbrella"; rec["C.B"] = "umbrella";
+    const { p } = p6MakeProject(M, rec, "T-100 OPTION A.xer"); p.p6 = { recipe: p6Recipe(M, rec), code: "T-100", source: "T-100 OPTION A.xer" }; p.meta.title = "Option A"; loadDoc(p, null);
+    // the planner's own touches
+    commit(q => { const a = q.items.find(i => i.id === "WBS C.A"); a.name = "My name"; a.fill = "#123456"; [a, ...descendants(q, a)].forEach(k => k.row += 2); q.lanes = [...q.lanes].reverse(); syncContainers(q); }, true);
+    const sig = i => [i.name, i.style, i.lane, i.row, i.parent || "", i.fill || ""].join("|"), before = new Map(P.items.map(i => [i.id, sig(i)])), lanes = P.lanes.map(l => l.id).join();
+    // same file, one more thing picked: Portion B's segment as its own bar is already there, so add the contingency as a key date
+    rec["~ms"] = { MS2: "here" }; P.p6.recipe = p6Recipe(M, { ...rec, "C.A.1": "bar" });
+    await importP6(new File([T.xer()], "T-100 OPTION A.xer"), "update");
+    document.querySelector(".modal [data-act=go]").click();
+    const pv = document.querySelector(".modal");
+    T.ok(pv.querySelector("#impKeep").checked && /0 changed/.test(pv.querySelector(".chips").innerText), "nothing of mine shows as a change");
+    pv.querySelector("[data-act=apply]").click();
+    T.eq([...before].filter(([id, s0]) => { const i = T.item(id); return i && sig(i) !== s0; }).map(([id]) => id), [], "names, colours, rows and lanes stay as they were");
+    T.eq(P.lanes.map(l => l.id).join(), lanes, "and the lane order");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));

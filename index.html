@@ -3795,15 +3795,15 @@ function previewImport(parsed, fname) {
     const cur = r.id && byId.get(r.id);
     if (!cur) { adds.push(r); continue; }
     const st = styleOf(lookup, r.style).name, ms = isMs(lookup, st), end = ms ? r.start : r.end;
-    const diffs = [];
-    if (r.name && r.name !== cur.name) diffs.push(["Name", cur.name, r.name]);
+    const diffs = [], look = !parsed.keepLook;   // keepLook (a P6 update): the sheet's names, types, lanes and summaries stay as they are
+    if (look && r.name && r.name !== cur.name) diffs.push(["Name", cur.name, r.name]);
     if (r.start !== cur.start) diffs.push([ms ? "Date" : "Start", fmt(cur.start), fmt(r.start)]);
     if (!ms && end !== cur.end) diffs.push(["Finish", fmt(cur.end), fmt(end)]);
-    if (st !== cur.style) diffs.push(["Style", cur.style, st]);
-    if (r.lane && r.lane.toLowerCase() !== laneName(cur.lane).toLowerCase()) diffs.push(["Lane", laneName(cur.lane), r.lane]);
+    if (look && st !== cur.style) diffs.push(["Style", cur.style, st]);
+    if (look && r.lane && r.lane.toLowerCase() !== laneName(cur.lane).toLowerCase()) diffs.push(["Lane", laneName(cur.lane), r.lane]);
     if (r.status && r.status !== cur.status) diffs.push(["Status", cur.status, r.status]);
-    if (r.parent !== undefined && (r.parent || "") !== (cur.parent || "")) diffs.push(["Summary", cur.parent || "(none)", r.parent || "(none)"]);
-    if (r.collapsed !== undefined && !!r.collapsed !== !!cur.collapsed) diffs.push(["Collapsed", cur.collapsed ? "Yes" : "No", r.collapsed ? "Yes" : "No"]);
+    if (look && r.parent !== undefined && (r.parent || "") !== (cur.parent || "")) diffs.push(["Summary", cur.parent || "(none)", r.parent || "(none)"]);
+    if (look && r.collapsed !== undefined && !!r.collapsed !== !!cur.collapsed) diffs.push(["Collapsed", cur.collapsed ? "Yes" : "No", r.collapsed ? "Yes" : "No"]);
     // progress and baseline (a summary's progress is worked out from its bars, so it isn't read back)
     const trackedRow = !isCurtain(lookup, st) && !/^container/.test(styleOf(lookup, st).shape);
     if (trackedRow && r.pct !== undefined && r.pct !== pctOf(cur)) diffs.push(["Progress", pctOf(cur) + "%", r.pct + "%"]);
@@ -3827,7 +3827,9 @@ function previewImport(parsed, fname) {
   const rowLanes = new Set(parsed.rows.filter(r => r.lane && !isCurtain(lookup, styleOf(lookup, r.style).name)).map(r => key(r.lane)));
   const laneDiffs = [];
   let lanesGone = [];
-  if (sheetLanes.length) {
+  if (sheetLanes.length && parsed.keepLook) {
+    for (const sl of sheetLanes) if (!P.lanes.some(l => key(l.name) === key(sl.name))) laneDiffs.push([sl.name, "New lane", null, sl.name]);
+  } else if (sheetLanes.length) {
     const inSheet = new Set(sheetLanes.map(l => key(l.name)));
     lanesGone = P.lanes.filter(l => !inSheet.has(key(l.name)) && !rowLanes.has(key(l.name)));
     for (const sl of sheetLanes) {
@@ -3855,21 +3857,23 @@ function previewImport(parsed, fname) {
   const nothing = !changes.length && !adds.length && !dupes.length && !newTypes.length && !laneDiffs.length && !ddChange;
   const removeLabel = [missing.length && `${missing.length} item${missing.length > 1 ? "s" : ""}`, lanesGone.length && `${lanesGone.length} lane${lanesGone.length > 1 ? "s" : ""}`].filter(Boolean).join(" and ");
   showModal(`
-    <header><h3>Update from ${esc(fname)}</h3><p>Rows are matched to the programme by ShapeID. Positions and colours you set on the sheet are kept.</p></header>
+    <header><h3>Update from ${esc(fname)}</h3><p>${parsed.keepLook ? "Only P6's dates, status, progress and new items come in: names, types, lanes, summaries, labels and positions you set on the sheet are kept." : "Rows are matched to the programme by ShapeID. Positions and colours you set on the sheet are kept."}</p></header>
     <div class="body">
       <div class="chips">
         ${newTypes.length ? `<span class="chip new">${newTypes.length} new type${newTypes.length > 1 ? "s" : ""}</span>` : ""}<span class="chip chg">${changes.length} changed</span><span class="chip new">${adds.length + dupes.length} new</span>
         ${laneDiffs.length ? `<span class="chip chg">${laneDiffs.length} lane change${laneDiffs.length > 1 ? "s" : ""}</span>` : ""}
-        <span class="chip miss">${removable} removed in workbook</span>${parsed.problems.length ? `<span class="chip err">${parsed.problems.length} skipped</span>` : ""}
+        <span class="chip miss">${removable} ${parsed.keepLook !== undefined ? "not in the P6 summary" : "removed in workbook"}</span>${parsed.problems.length ? `<span class="chip err">${parsed.problems.length} skipped</span>` : ""}
       </div>
       ${body ? `<div style="overflow-x:auto"><table class="diff"><thead><tr><th>ShapeID / lane</th><th>Change</th><th>Detail</th></tr></thead><tbody>${body}</tbody></table></div>` : `<p class="note">The workbook matches the programme. Nothing to update.</p>`}
     </div>
     <footer>
-      ${removable ? `<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="impDel" ${parsed.fromTool ? "checked" : ""}> Remove the ${removeLabel} no longer in the workbook</label>` : ""}
+      ${parsed.keepLook !== undefined ? `<label style="display:flex;gap:6px;align-items:center" title="Off: names, types, lanes, summaries and labels go back to what the P6 summary makes"><input type="checkbox" id="impKeep" data-act="keep" ${parsed.keepLook ? "checked" : ""}> Keep my sheet as it is</label>` : ""}
+      ${removable ? `<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="impDel" ${parsed.fromTool ? "checked" : ""}> Remove the ${removeLabel} no longer in the ${parsed.keepLook !== undefined ? "P6 summary" : "workbook"}</label>` : ""}
       <span class="spacer" style="flex:1"></span>
       <button class="btn" data-act="close">Cancel</button>
       <button class="btn primary" data-act="apply" ${nothing && !removable ? "disabled" : ""}>Apply update</button>
     </footer>`, {
+    keep: () => { setTimeout(() => previewImport({ ...parsed, keepLook: !parsed.keepLook }, fname)); },   // the review again, the other way
     apply: m => {
       const del = m.querySelector("#impDel")?.checked;
       commit(p => {
@@ -3879,6 +3883,17 @@ function previewImport(parsed, fname) {
         for (const c of changes) {
           const it = p.items.find(i => i.id === c.cur.id), r = c.r, st = styleOf(p, r.style).name;
           const oldLane = it.lane;
+          if (parsed.keepLook) {   // P6's dates and status; everything about how it looks and where it sits stays
+            Object.assign(it, { start: r.start, end: isMs(p, it.style) ? r.start : r.end, status: r.status || it.status });
+            if (tracked(it)) {
+              if (r.pct !== undefined) { if (r.pct) it.pct = r.pct; else delete it.pct; }
+              if (r.bStart !== undefined) { if (r.bStart) { it.bStart = r.bStart; it.bEnd = isMs(p, it.style) ? r.bStart : (r.bEnd || r.bStart); } else { delete it.bStart; delete it.bEnd; } }
+              if (r.preds !== undefined) { if (r.preds.length) it.preds = r.preds; else delete it.preds; }
+            }
+            if (r.p6) { if (r.p6.crit) it.p6crit = true; else delete it.p6crit; if (r.p6.tf != null) it.p6tf = r.p6.tf; else delete it.p6tf; }
+            if (r.x) Object.assign(it, r.x);   // P6 data: stage versions, notes (the stage choice is the one saved from the sheet)
+            continue;
+          }
           Object.assign(it, { name: r.name || it.name, start: r.start, end: isMs(p, st) ? r.start : r.end, style: st, status: r.status || it.status });
           if (r.fill) it.fill = r.fill; if (r.stroke) it.stroke = r.stroke;
           if (r.lane) { it.lane = laneFor(r.lane); if (it.lane !== oldLane) it.row = freeRow(p, it); }
@@ -3909,11 +3924,15 @@ function previewImport(parsed, fname) {
           if (r.p6) { if (r.p6.crit) it.p6crit = true; if (r.p6.tf != null) it.p6tf = r.p6.tf; }
           if (r.x) Object.assign(it, r.x);
           if (r.labelMode && r.labelMode !== "auto") it.labelMode = r.labelMode;
-          it.row = curtain ? 0 : Number.isFinite(r.row) ? r.row : freeRow(p, it);
+          const par = it.parent && p.items.find(i => i.id === it.parent);
+          if (!curtain && par && Number.isFinite(r.relRow)) it.row = par.row + r.relRow;   // where it sits in its summary, wherever that summary is now
+          else if (!curtain && parsed.keepLook && /^container/.test(styleOf(p, st).shape)) it.row = p.items.filter(i => i.lane === it.lane && !isCurtain(p, i.style)).reduce((m, i) => Math.max(m, bottomOf(p, i)), -1) + 1;
+          else it.row = curtain ? 0 : Number.isFinite(r.row) ? r.row : freeRow(p, it);
           p.items.push(it);
         }
         // lanes from the Lanes sheet: create missing ones, apply colours, then put them in the sheet's order
-        if (sheetLanes.length) {
+        if (sheetLanes.length && parsed.keepLook) sheetLanes.forEach(sl => laneFor(sl.name));   // only lanes it needs that aren't there yet
+        else if (sheetLanes.length) {
           for (const sl of sheetLanes) {
             const l = p.lanes.find(x => key(x.name) === key(sl.name)) || p.lanes.find(x => x.id === laneFor(sl.name));
             if (sl.colour) l.colour = sl.colour;
@@ -4538,11 +4557,16 @@ function openP6Builder(M, rec, fname, mode, from = null) {
         const fitted = (p6MakeProject(M, rec, fname).p || { items: [] }).items, byId = new Map(fitted.map(i => [i.id, i]));
         rows.forEach(r => { const f = byId.get(r.id); if (f && /^container/.test(styleOf(P, r.style).shape || "") && f.fitChildren !== false) { r.start = f.start; r.end = f.end; } });
         // existing items keep the row they have on the sheet; new ones go where the summary puts them
-        rows.forEach(r => { if (P.items.some(i => i.id === r.id)) r.row = NaN; });
+        const builtRow = new Map(rows.map(r => [r.id, r.row]));
+        rows.forEach(r => {
+          if (P.items.some(i => i.id === r.id)) { r.row = NaN; return; }
+          if (r.parent && builtRow.has(r.parent)) { r.relRow = r.row - builtRow.get(r.parent); r.row = NaN; }   // placed under its summary at apply time
+          else if (r.lane && !isCurtain(P, r.style)) r.row = NaN;   // anything else new: a free row, not where a fresh build would put it
+        });
         const keep = m.querySelector("#p6Keep")?.checked, sep = m.querySelector("#p6Sep")?.checked;
         const before = P.meta.title || ((P.p6 && P.p6.source) || "Previous").replace(/\.xer$/i, "");
         // nothing changes until the update is applied: then the baseline, the new scenario name and the new file
-        previewImport({ rows, lanes, meta: {}, timeline: null, page: null, problems: [], styles: [], fromTool: false, progress: dataDate ? { dataDate } : undefined,
+        previewImport({ rows, lanes, meta: {}, timeline: null, page: null, problems: [], styles: [], fromTool: false, keepLook: true, progress: dataDate ? { dataDate } : undefined,
           onApply: q => {
             q.p6 = p6;
             if (keep) { q.items.forEach(i => { if (!isCurtain(q, i.style)) { i.bStart = i.start; i.bEnd = i.end; } }); q.progress = { ...prog(), ...(q.progress || {}), baseline: true, baselineSet: todayISO(), baselineName: before }; }
