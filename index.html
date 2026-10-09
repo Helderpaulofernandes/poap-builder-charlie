@@ -4583,7 +4583,10 @@ function openP6Builder(M, rec, fname, mode, from = null) {
     const rows = [], scroll = tree.scrollTop;
     const add = (w, ctx = {}) => {   // ctx: { taken: why it has no choice of its own } or { inBox: true }
       const r = p6Roll(M, w); if (!r.all.length) return;
-      const md = rec[w.path] || "hide", ownMs = summary() && !ctx.keyDates && md !== "ms" ? M.tasks.filter(t => t.ms && t.wbs === w && (M.includeAll || !M.out.has(t))) : [];
+      // milestones to offer here: a part drawn as one thing (umbrella, bar, zone) lists every milestone inside it, straight under it;
+      // elsewhere a part lists its own
+      const md = rec[w.path] || "hide", whole = !ctx.taken && ["umbrella", "bar", "zone"].includes(md), live = t => M.includeAll || !M.out.has(t);
+      const ownMs = !summary() || ctx.keyDates || ctx.msShown || md === "ms" ? [] : whole ? p6Roll(M, w).ms.filter(live) : M.tasks.filter(t => t.ms && t.wbs === w && live(t));
       const kidsHere = w.kids.some(k => p6Roll(M, k).all.length) || ownMs.length > 0;
       const here = !summary() ? modes : ctx.inBox ? P6_MODES_IN_BOX : modes;
       const extra = summary() && md === "umbrella" ? (() => {
@@ -4598,15 +4601,17 @@ function openP6Builder(M, rec, fname, mode, from = null) {
         ${ctx.taken ? `<span class="note p6taken">${ctx.taken}</span>` : `<select data-mode="${esc(w.path)}" aria-label="What ${esc(w.name)} shows">${here.map(([v, n]) => `<option value="${v}" ${v === md ? "selected" : ""}>${n}</option>`).join("")}${here.some(([v]) => v === md) ? "" : `<option value="${esc(md)}" selected>${esc((modes.find(([v]) => v === md) || [md, md])[1])}</option>`}</select>`}</div>`);
       if (!open.has(w.path)) return;
       if (!summary()) { if (showKids(w) || md === "hide") w.kids.forEach(k => add(k)); return; }
-      // what its parts can be: chosen one by one (lane, box, not shown), or taken by it (umbrella, bar, zone…)
-      const kidCtx = ctx.taken ? { taken: ctx.taken, keyDates: ctx.keyDates } : md === "group" ? { inBox: true } : md === "split" ? { inBox: !!ctx.inBox } : md === "lane" ? {} : { taken: P6_TAKEN[md] || "in the part above", keyDates: md === "ms" };
-      w.kids.forEach(k => add(k, kidCtx));
-      // its own milestones: each can be picked, wherever it sits (an AFC milestone inside an umbrella, say)
       const picks = rec["~ms"] || {};
-      ownMs.forEach(t => rows.push(`<div class="p6row p6msrow ${picks[t.code] ? "" : "off"}" style="--d:${w.depth}">
+      const msRow = t => `<div class="p6row p6msrow ${picks[t.code] ? "" : "off"}" style="--d:${w.depth}">
         <span></span><span class="p6name" title="${esc(t.code)} · ${esc(t.name)}"><span class="p6title"><span class="p6dia" aria-hidden="true">◆</span> ${esc(t.name)}</span></span>
-        <span class="p6meta">${fmt(t.start)}<br>milestone</span>
-        <select data-ms="${esc(t.code)}" aria-label="What ${esc(t.name)} shows">${P6_MS_CHOICES.map(([v, n]) => `<option value="${v}" ${(picks[t.code] || "off") === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>`));
+        <span class="p6meta">${fmt(t.start)}<br>${t.wbs && t.wbs !== w ? esc(t.wbs.name) : "milestone"}</span>
+        <select data-ms="${esc(t.code)}" aria-label="What ${esc(t.name)} shows">${P6_MS_CHOICES.map(([v, n]) => `<option value="${v}" ${(picks[t.code] || "off") === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>`;
+      if (whole) ownMs.forEach(t => rows.push(msRow(t)));   // first, before its parts
+      // what its parts can be: chosen one by one (lane, box, not shown), or taken by it (umbrella, bar, zone…)
+      const kidCtx = ctx.taken ? { taken: ctx.taken, keyDates: ctx.keyDates, msShown: ctx.msShown } : md === "group" ? { inBox: true } : md === "split" ? { inBox: !!ctx.inBox } : md === "lane" ? {} : { taken: P6_TAKEN[md] || "in the part above", keyDates: md === "ms", msShown: whole };
+      w.kids.forEach(k => add(k, kidCtx));
+      // its own milestones: each can be picked, wherever it sits
+      if (!whole) ownMs.forEach(t => rows.push(msRow(t)));
     };
     M.top.kids.forEach(add);
     tree.innerHTML = rows.join(""); tree.scrollTop = scroll;
