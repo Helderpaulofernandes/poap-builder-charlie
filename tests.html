@@ -594,6 +594,26 @@ const TESTS = {
     b.click();
     T.eq([kids().length, T.item(keep.id).name], [5, "Kept and renamed"], "all back; the one still there is left as it was");
   },
+  "Reset a part fresh from P6, leaving the rest of the sheet's dates alone": async () => {
+    await importP6(new File([T.xer()], "T-100 OPTION A.xer"), "new");
+    let m = document.querySelector(".modal"); const set = (path, v) => { const x = m.querySelector(`[data-mode="${path}"]`); x.value = v; x.dispatchEvent(new Event("change", { bubbles: true })); };
+    set("C", "lane"); set("C.A", "umbrella"); set("C.B", "umbrella");
+    m.querySelector("[data-act=go]").click(); await new Promise(r => setTimeout(r, 150)); T.clean();
+    const A0 = containerChildren(P, T.item("WBS C.A")).map(k => [k.id, k.name, k.start, k.row - T.item("WBS C.A").row]);
+    // on the sheet: Portion A's stages messed with (one renamed and moved, one deleted), Portion B's dates moved by hand
+    commit(p => { const k = p.items.find(i => i.id === A0[0][0]); k.name = "Renamed"; k.start = "2027-05-10"; k.row += 1; p.items.find(i => i.id === "WBS C.B · 1") && (p.items.find(i => i.id === "WBS C.B · 1").start = "2027-05-20"); }, true);
+    deleteItems([A0[1][0]]);
+    await document.getElementById("bP6Edit").onclick(); m = document.querySelector(".modal");
+    const tog = k => { const t = m.querySelector(`[data-tog="${k}"]`); if (t && t.textContent.includes("▸")) t.click(); }; tog("C");
+    m.querySelector('[data-reset="C.A"]').click();
+    T.ok(/reset from P6/.test(m.querySelector('[data-mode="C.A"]').closest(".p6row").innerText), "the part says it will be reset");
+    const d = m.querySelector("#p6Dates"); d.checked = false; d.dispatchEvent(new Event("change"));
+    m.querySelector("[data-act=go]").click();
+    document.querySelector(".modal [data-act=apply]").click();
+    const A1 = containerChildren(P, T.item("WBS C.A")).map(k => [k.id, k.name, k.start, k.row - T.item("WBS C.A").row]);
+    T.eq(A1.sort().join("|"), A0.sort().join("|"), "Portion A is back exactly as the import made it");
+    T.eq(T.item("WBS C.B · 1") && T.item("WBS C.B · 1").start, "2027-05-20", "and Portion B kept the date set by hand");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));

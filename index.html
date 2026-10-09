@@ -97,6 +97,7 @@ button.p6tag { cursor: pointer; font-size: 11.5px; padding: 1px 8px; }
 .p6tag.on:not(button) { color: var(--muted); }
 button.p6tag.on { outline: 2px solid currentColor; }
 .p6tag a { color: inherit; }
+.p6resetlnk { flex: none; font-size: 10.5px; color: var(--muted); }
 .p6chg { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12px; }
 .p6legend { margin: 0; padding: 4px 8px; font-size: 11px; color: #333; display: flex; gap: 6px; align-items: center; }
 .p6legend .k { display: inline-block; width: 14px; height: 9px; border: 2px solid; border-radius: 2px; }
@@ -3877,7 +3878,8 @@ function previewImport(parsed, fname) {
     const cur = r.id && byId.get(r.id);
     if (!cur) { adds.push(r); continue; }
     const st = styleOf(lookup, r.style).name, ms = isMs(lookup, st), end = ms ? r.start : r.end;
-    const diffs = [], look = !parsed.keepLook;   // keepLook (a P6 update): the sheet's names, types, lanes and summaries stay as they are
+    const diffs = [], look = !parsed.keepLook || r.reset;
+    if (r.reset) diffs.push(["Reset from P6", null, "as a fresh import makes it"]);   // keepLook (a P6 update): the sheet's names, types, lanes and summaries stay as they are
     if (look && r.name && r.name !== cur.name) diffs.push(["Name", cur.name, r.name]);
     if (r.start !== cur.start) diffs.push([ms ? "Date" : "Start", fmt(cur.start), fmt(r.start)]);
     if (!ms && end !== cur.end) diffs.push(["Finish", fmt(cur.end), fmt(end)]);
@@ -3966,7 +3968,7 @@ function previewImport(parsed, fname) {
         for (const c of changes) {
           const it = p.items.find(i => i.id === c.cur.id), r = c.r, st = styleOf(p, r.style).name;
           const oldLane = it.lane;
-          if (parsed.keepLook) { p6RefreshItem(p, it, r); continue; }   // P6's dates and status; how it looks and where it sits stay
+          if (parsed.keepLook && !r.reset) { p6RefreshItem(p, it, r); continue; }   // P6's dates and status; how it looks and where it sits stay
           Object.assign(it, { name: r.name || it.name, start: r.start, end: isMs(p, st) ? r.start : r.end, style: st, status: r.status || it.status });
           if (r.fill) it.fill = r.fill; if (r.stroke) it.stroke = r.stroke;
           if (r.lane) { it.lane = laneFor(r.lane); if (it.lane !== oldLane) it.row = freeRow(p, it); }
@@ -3981,6 +3983,13 @@ function previewImport(parsed, fname) {
           }
           if (r.p6) { if (r.p6.crit) it.p6crit = true; else delete it.p6crit; if (r.p6.tf != null) it.p6tf = r.p6.tf; else delete it.p6tf; }   // P6's float, quietly refreshed
           if (r.x) Object.assign(it, r.x);
+          if (r.reset) {   // fresh from P6: its own look back to the type's, its place in its summary as the import puts it
+            it.fill = r.fill || ""; it.stroke = r.stroke || "";
+            ["titleAlign", "titleSize", "titleWeight", "titleColour"].forEach(k => delete it[k]);
+            if (!r.labelMode) delete it.labelMode;
+            const par = it.parent && p.items.find(i => i.id === it.parent);
+            if (par && Number.isFinite(r.relRow)) it.row = par.row + r.relRow;
+          }
         }
         if (ddChange) p.progress = { ...prog(), ...(p.progress || {}), dataDate: ddNew };
         const reserved = new Set(parsed.rows.map(r => r.id).filter(Boolean));
@@ -4537,8 +4546,9 @@ function p6UpdateRows(M, rec, fname) {
   rows.forEach(r => { const f = byId.get(r.id); if (f && isContainer(fp, f) && f.fitChildren !== false) { r.start = f.start; r.end = f.end; } });
   const builtRow = new Map(rows.map(r => [r.id, r.row])), have = new Set(P.items.map(i => i.id));
   rows.forEach(r => {
+    if (r.parent && builtRow.has(r.parent)) r.relRow = r.row - builtRow.get(r.parent);   // its place in its summary
     if (have.has(r.id)) { r.row = NaN; return; }
-    if (r.parent && builtRow.has(r.parent)) { r.relRow = r.row - builtRow.get(r.parent); r.row = NaN; }   // placed under its summary at apply time
+    if (r.parent && builtRow.has(r.parent)) { r.row = NaN; return; }   // placed under its summary at apply time
     else if (r.lane && !(fp && isCurtain(fp, r.style))) r.row = NaN;   // anything else new: a free row, not where a fresh build would put it
   });
   return built;
@@ -4658,7 +4668,8 @@ function openP6Builder(M, rec, fname, mode, from = null) {
     <footer>
       <button class="btn" id="p6Reset" title="Back to the suggestion from the WBS">Suggest again</button>
       <span class="p6sets" id="p6Sets"></span>
-      ${update ? `<label class="check" title="Show this programme's current dates as a narrow grey baseline under the updated bars"><input type="checkbox" id="p6Keep" ${otherScenario ? "checked" : ""}> Show the current dates as the baseline</label>
+      ${update ? `<label class="check" title="Off: only new items and parts you reset come in; everything else keeps its dates"><input type="checkbox" id="p6Dates" checked> Update the dates of what's already on the sheet</label>
+        <label class="check" title="Show this programme's current dates as a narrow grey baseline under the updated bars"><input type="checkbox" id="p6Keep" ${otherScenario ? "checked" : ""}> Show the current dates as the baseline</label>
         <label class="check" title="Keep this programme as it is and save the update as its own file"><input type="checkbox" id="p6Sep" ${otherScenario ? "checked" : ""}> Make it a separate programme${otherScenario ? ` (“${esc(p6Scenario(fname))}”)` : ""}</label>` : ""}
       <span class="spacer" style="flex:1"></span><button class="btn" data-act="close">Cancel</button>
       <button class="btn primary" data-act="go">${update ? "Review the changes" : "Build the summary"}</button></footer>`, {
@@ -4706,14 +4717,20 @@ function openP6Builder(M, rec, fname, mode, from = null) {
   }
   const revive = new Set(), removedNodes = new Map(), removedMs = new Set();   // brought back by hand / parts and milestones removed on the sheet
   let A = null, filter = "";   // the latest analysis; the changes line's filter
+  const resetPaths = new Set();   // parts to bring in fresh from P6 (everything in them, as a new import makes it)
+  let datesToo = true;            // the rest of the sheet takes P6's dates (off: only what's new or reset comes in)
+  const inReset = r => { const src = r.src || pathOf(r.id) || ""; for (const pth of resetPaths) if (src === pth || src.startsWith(pth + ".")) return true; return false; };
   const pathOf = id => { const x = /^(?:WBS|ZONE) (\S+)/.exec(id); return x ? x[1] : null; };
   function analyse() {
     const built = p6UpdateRows(M, rec, fname);
     const known = knownIds.size ? knownIds : new Set(built.rows.filter(r => sheetIds.has(r.id)).map(r => r.id));   // older programmes: what's there
-    const removed = new Set(built.rows.filter(r => known.has(r.id) && !sheetIds.has(r.id) && !revive.has(r.id)).map(r => r.id));
-    const rows = built.rows.filter(r => !removed.has(r.id)), byIdP = new Map(P.items.map(i => [i.id, i]));
+    built.rows.forEach(r => { r.reset = inReset(r) && sheetIds.has(r.id); });
+    const removed = new Set(built.rows.filter(r => known.has(r.id) && !sheetIds.has(r.id) && !revive.has(r.id) && !inReset(r)).map(r => r.id));
+    const byIdP = new Map(P.items.map(i => [i.id, i]));
+    const rows = built.rows.filter(r => !removed.has(r.id) && (datesToo || !byIdP.has(r.id) || r.reset));   // dates off: only what's new or reset
+    rows.forEach(r => { if (r.reset) { const i = byIdP.get(r.id); if (i) r.lane = (P.lanes.find(l => l.id === i.lane) || {}).name || r.lane; } });   // a reset part stays in its lane
     // a summary on the sheet keeps the dates it has: they follow what's inside it there (some of it may have been taken off)
-    rows.forEach(r => { const i = byIdP.get(r.id); if (i && isContainer(P, i) && i.fitChildren !== false) { r.start = i.start; r.end = i.end; } });
+    rows.forEach(r => { const i = byIdP.get(r.id); if (i && !r.reset && isContainer(P, i) && i.fitChildren !== false) { r.start = i.start; r.end = i.end; } });
     // the import's lanes on the sheet: there by name, or renamed / merged (where most of what came from it sits now), or gone
     const sheetLane = n => P.lanes.find(l => l.name.toLowerCase() === String(n || "").toLowerCase()), laneOfId = id => (P.lanes.find(l => l.id === id) || {}).name;
     const votes = new Map();
@@ -4755,6 +4772,8 @@ function openP6Builder(M, rec, fname, mode, from = null) {
   const changeTag0 = path => {
     const f = A.flags.get(path); if (!f) return "";
     const t = [];
+    if (resetPaths.has(path)) return `<span class="p6tag new" title="Everything in it comes in as a fresh import makes it">reset from P6 · <a href="#" data-reset="${esc(path)}">undo</a></span>`;
+    if (f.on || f.removed) t.push(`<a href="#" class="p6resetlnk" data-reset="${esc(path)}" title="Bring this part in fresh from P6: names, types, dates, places in its summary, and anything deleted from it">reset</a>`);
     if (f.fresh) t.push(`<span class="p6tag new" title="Not on the sheet yet: the update adds it">${f.on ? `+${f.fresh} new` : "new"}</span>`);
     if (f.moved) t.push(`<span class="p6tag mov" title="On the sheet; this XER moves its dates">dates move</span>`);
     if (f.removed) t.push(`<span class="p6tag rem" title="Taken off the sheet: they stay off">${f.removed} removed on the sheet · <a href="#" data-revive="${esc(path)}">bring back</a></span>`);
@@ -4926,10 +4945,13 @@ function openP6Builder(M, rec, fname, mode, from = null) {
     paint();
   });
   tree.addEventListener("click", e => {
+    const rs = e.target.closest("[data-reset]");
+    if (rs) { e.preventDefault(); resetPaths.has(rs.dataset.reset) ? resetPaths.delete(rs.dataset.reset) : resetPaths.add(rs.dataset.reset); paint(); return; }
     const rv = e.target.closest("[data-revive]");
     if (rv && A) { e.preventDefault(); A.all.filter(r => (r.src || pathOf(r.id)) === rv.dataset.revive && A.removed.has(r.id)).forEach(r => revive.add(r.id)); paint(); return; }   // the removed parts come back
     const b = e.target.closest("[data-tog]"); if (!b) return; const k = b.dataset.tog; open.has(k) ? open.delete(k) : open.add(k); paint();
   });
+  if (update) m.querySelector("#p6Dates").onchange = e => { datesToo = e.target.checked; paint(); };
   if (update) m.querySelector("#p6Chg").addEventListener("click", e => { const b = e.target.closest("[data-filter]"); if (!b) return; e.preventDefault(); filter = filter === b.dataset.filter ? "" : b.dataset.filter; paint(); });
   m.querySelectorAll("[data-style]").forEach(b => b.onclick = () => {
     if ((rec["~style"] || "detailed") === b.dataset.style) return;
