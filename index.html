@@ -4692,6 +4692,16 @@ function openP6Builder(M, rec, fname, mode, from = null) {
     const rows = built.rows.filter(r => !removed.has(r.id)), byIdP = new Map(P.items.map(i => [i.id, i]));
     // a summary on the sheet keeps the dates it has: they follow what's inside it there (some of it may have been taken off)
     rows.forEach(r => { const i = byIdP.get(r.id); if (i && isContainer(P, i) && i.fitChildren !== false) { r.start = i.start; r.end = i.end; } });
+    // the import's lanes on the sheet: there by name, or renamed / merged (where most of what came from it sits now), or gone
+    const sheetLane = n => P.lanes.find(l => l.name.toLowerCase() === String(n || "").toLowerCase()), laneOfId = id => (P.lanes.find(l => l.id === id) || {}).name;
+    const votes = new Map();
+    for (const r of built.rows) { const i = byIdP.get(r.id); if (i && r.lane && i.lane) { const v = votes.get(r.lane) || votes.set(r.lane, new Map()).get(r.lane), n = laneOfId(i.lane); v.set(n, (v.get(n) || 0) + 1); } }
+    const laneNow = new Map();   // the import's lane name -> { name on the sheet | null, how: "same" | "moved" | "gone" }
+    for (const l of built.lanes) {
+      if (sheetLane(l.name)) { laneNow.set(l.name, { name: sheetLane(l.name).name, how: "same" }); continue; }
+      const v = votes.get(l.name); laneNow.set(l.name, v ? { name: [...v].sort((a, b) => b[1] - a[1])[0][0], how: "moved" } : { name: null, how: "gone" });
+    }
+    rows.forEach(r => { if (!byIdP.has(r.id) && r.lane && laneNow.get(r.lane)?.how === "moved") r.lane = laneNow.get(r.lane).name; });   // new items go where its items went
     const fresh = new Set(rows.filter(r => !byIdP.has(r.id)).map(r => r.id));
     // (a summary's dates follow what's inside it: its own aren't a change, what's inside moving is)
     const moved = new Set(rows.filter(r => { const i = byIdP.get(r.id); return i && !(isContainer(P, i) && i.fitChildren !== false) && (i.start !== r.start || (!isMs(P, i.style) && !isShape(P, i, "gate") && i.end !== r.end)); }).map(r => r.id));
@@ -4707,11 +4717,20 @@ function openP6Builder(M, rec, fname, mode, from = null) {
     for (const r of built.rows) { const src = r.src || pathOf(r.id); if (removed.has(r.id)) bump(src, "removed"); else if (fresh.has(r.id)) bump(src, "fresh"); else { bump(src, "on"); if (moved.has(r.id)) bump(src, "moved"); } }
     leaving.forEach(id => bump(pathOf(id), "leaving"));
     removedNodes.forEach((ids, path) => bump(path, "removed"));
-    return { rows, all: built.rows, lanes: built.lanes, keyMs: built.keyMs, role: built.role, fresh, removed, moved, leaving, flags, sub };
+    return { rows, all: built.rows, lanes: built.lanes, keyMs: built.keyMs, role: built.role, fresh, removed, moved, leaving, flags, sub, laneNow };
   }
+  const laneTag = path => {   // a part shown as a lane: where that lane is on the sheet now
+    const l = A && A.lanes.find(x => x.key === path), st = l && A.laneNow.get(l.name);
+    if (!st || st.how === "same") return "";
+    return st.how === "moved" ? `<span class="p6tag on" title="The lane was renamed or merged on the sheet: what's new from here goes there">lane → ${esc(st.name)}</span>` : `<span class="p6tag rem" title="The lane was deleted on the sheet">lane removed on the sheet</span>`;
+  };
   const changeTag = path => {
     if (!A) return "";
-    if (removedNodes.has(path)) return `<span class="p6tag rem" title="Taken off the sheet since the last import: pick what it shows to bring it back">removed on the sheet</span>`;
+    if (removedNodes.has(path)) return `<span class="p6tag rem" title="Taken off the sheet since the last import: pick what it shows to bring it back">${removedNodes.get(path).lane ? "lane removed on the sheet" : "removed on the sheet"}</span>`;
+    const lt = laneTag(path); if (lt) return lt + changeTag0(path);
+    return changeTag0(path);
+  };
+  const changeTag0 = path => {
     const f = A.flags.get(path); if (!f) return "";
     const t = [];
     if (f.fresh) t.push(`<span class="p6tag new" title="Not on the sheet yet: the update adds it">${f.on ? `+${f.fresh} new` : "new"}</span>`);
@@ -4737,6 +4756,13 @@ function openP6Builder(M, rec, fname, mode, from = null) {
       if (!rs.every(r => a0.removed.has(r.id)) || !M.nodes.some(w => w.path === path)) continue;
       if (a0.all.some(r => (r.src || "").startsWith(path + ".") && sheetIds.has(r.id))) continue;
       removedNodes.set(path, rs.map(r => r.id)); rec[path] = "hide";
+    }
+    // a part shown as a lane whose lane was deleted, with nothing that came from it left on the sheet: left out
+    for (const l of a0.lanes) {
+      if (!l.key || a0.laneNow.get(l.name)?.how !== "gone" || rec[l.key] !== "lane" || !M.nodes.some(w => w.path === l.key)) continue;
+      const mine = a0.all.filter(r => r.lane === l.name || (r.src || "") === l.key || (r.src || "").startsWith(l.key + "."));
+      if (mine.some(r => sheetIds.has(r.id)) || !mine.every(r => knownIds.has(r.id))) continue;   // something of it is still there, or it's new
+      const ids = mine.map(r => r.id); ids.lane = true; removedNodes.set(l.key, ids); rec[l.key] = "hide";
     }
     // key dates, picked milestones, the phase band and the zones taken off the sheet: left out too
     for (const t of a0.keyMs) { const role = a0.role(t), id = role === "gate" ? "GATE " + t.code : role === "ms" ? t.code : null; if (id && a0.removed.has(id)) { rec["~dates"] = { ...(rec["~dates"] || {}), [t.code]: "hide" }; removedMs.add(t.code); } }

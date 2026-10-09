@@ -546,6 +546,27 @@ const TESTS = {
     const pv = document.querySelector(".modal");
     T.ok(/0 new/.test(pv.querySelector(".chips").innerText), "and nothing comes back");
   },
+  "The XER importer reads the lanes: a deleted lane stays off, a renamed one takes what's new": async () => {
+    await importP6(new File([T.xer()], "T-100 OPTION A.xer"), "new");
+    let m = document.querySelector(".modal"); const set = (path, v) => { const x = m.querySelector(`[data-mode="${path}"]`); x.value = v; x.dispatchEvent(new Event("change", { bubbles: true })); };
+    set("D", "lane"); set("C", "lane"); set("C.A", "umbrella"); set("C.B", "hide");
+    m.querySelector("[data-act=go]").click(); await new Promise(r => setTimeout(r, 150)); T.clean();
+    // the Design lane deleted (with what's in it); Construction renamed
+    const design = P.lanes.find(l => l.name === "Design"), cons = P.lanes.find(l => l.name === "Construction");
+    sel = { type: "lane", id: design.id }; render(); renderSide(); document.getElementById("lDel").click();
+    commit(p => p.lanes.find(l => l.id === cons.id).name = "Works North", true);
+    await document.getElementById("bP6Edit").onclick(); m = document.querySelector(".modal");
+    const row = path => m.querySelector(`[data-mode="${path}"]`).closest(".p6row");
+    T.eq(m.querySelector('[data-mode="D"]').value, "hide", "the deleted lane opens as Leave out");
+    T.ok(/lane removed on the sheet/.test(row("D").innerText), "and says why");
+    T.ok(/lane → Works North/.test(row("C").innerText), "the renamed lane is recognised");
+    // something new from Construction goes into Works North, no new lane
+    set("C.B", "umbrella"); m.querySelector("[data-act=go]").click();
+    const pv = document.querySelector(".modal");
+    T.ok(!/New lane/.test(pv.innerText), "no lane made for it");
+    pv.querySelector("[data-act=apply]").click();
+    T.eq([P.lanes.find(l => l.id === T.item("WBS C.B").lane).name, P.lanes.some(l => l.name === "Construction" || l.name === "Design")], ["Works North", false], "it went into the renamed lane");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));
