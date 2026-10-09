@@ -87,6 +87,8 @@ button, input, select { font: inherit; color: inherit; }
 .p6opts select { padding: 1px 3px; font-size: 11px; border: 1px solid var(--line); border-radius: 3px; background: var(--bg); }
 .p6opt { align-items: flex-start; }
 .p6taken { font-size: 11px; font-style: italic; text-align: right; }
+.p6msrow { font-size: 12px; }
+.p6dia { color: var(--accent-2); font-size: 10px; }
 .p6opt .note { font-size: 11px; line-height: 1.3; }
 .p6dates { display: grid; gap: 4px; border: 1px solid var(--line); border-radius: 4px; padding: 6px; }
 .p6dates label { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 6px; align-items: center; font-size: 11.5px; }
@@ -4257,8 +4259,10 @@ function p6BuildSummary(M, rec) {
     take(L, rowsUsed.length || 1);
   }
   // 2. key dates: milestones, gate lines and the phase band
-  const keyMs = [...new Map(M.nodes.filter(w => mode(w) === "ms").flatMap(w => p6Roll(M, w).ms).map(t => [t.code, t])).values()].sort((a, b) => a.start < b.start ? -1 : 1);
-  const roles = rec["~dates"] || {}, role = t => roles[t.code] || p6DateRole(t);
+  // milestones picked one by one in the tree (rec["~ms"]: code -> here | key | gate), wherever their WBS part is
+  const picks = rec["~ms"] || {}, picked = M.tasks.filter(t => t.ms && picks[t.code] && (M.includeAll || !M.out.has(t)));
+  const keyMs = [...new Map([...M.nodes.filter(w => mode(w) === "ms").flatMap(w => p6Roll(M, w).ms), ...picked.filter(t => picks[t.code] !== "here")].map(t => [t.code, t])).values()].sort((a, b) => a.start < b.start ? -1 : 1);
+  const roles = rec["~dates"] || {}, role = t => roles[t.code] || (picks[t.code] === "key" ? "ms" : picks[t.code] === "gate" ? "gate" : p6DateRole(t));
   const asMs = keyMs.filter(t => role(t) === "ms");
   if (asMs.length) {
     const L = addLane("~key", "Key Dates", true);
@@ -4292,7 +4296,7 @@ function p6BuildSummary(M, rec) {
     if (pc && pEnd > pc.start) rows.push({ id: "ZONE PC", name: "Practical Completion", style: "ZONE_PC", lane: "", start: addDays(pc.start, 1), end: pEnd, status: "Active", row: 0, y: NaN, fill: "", stroke: "" });
   }
   // 3. the work: lanes, umbrellas (with their stages and possession tiles), plain bars and zones, in WBS order
-  const tilesDone = new Set();
+  const tilesDone = new Set(), drawnBy = new Map(), laneByPath = new Map();   // WBS path -> rows that draw it / its lane
   const umbrella = (w, lane, box = null) => {   // box: { id, minRow } when it sits inside a summary box
     const design = p6IsDesign(w), acts = p6Roll(M, w).work;
     if (!acts.length) return;
@@ -4311,7 +4315,8 @@ function p6BuildSummary(M, rec) {
       const tiles = rec["~tiles"] !== false && g.acts.some(t => !tilesDone.has(t.code) && p6PossType(t));
       const half = Math.max(0, (textW(name, 9, 700) + 24) / dayPx() - (toDays(e) - toDays(s))) / 2;
       const top = place(lane, tiles ? 3 : 2, toDays(s) - half - 14, toDays(e) + half + 14, box ? box.minRow : 0);
-      rows.push({ id, name, style: p6UStyle(w, design), lane: lane.name, start: s, end: e, status: "Active", row: top, y: NaN, fill: "", stroke: "", p6: { crit: crit(g.acts) }, acts: g.acts, ...(box ? { parent: box.id } : {}), x: { p6path: w.path, stagesBy: by, stageSets } });
+      const urow = { id, name, style: p6UStyle(w, design), lane: lane.name, start: s, end: e, status: "Active", row: top, y: NaN, fill: "", stroke: "", p6: { crit: crit(g.acts) }, acts: g.acts, ...(box ? { parent: box.id } : {}), x: { p6path: w.path, stagesBy: by, stageSets }, face: g.face };
+      rows.push(urow); drawnBy.set(w.path, [...(drawnBy.get(w.path) || []), urow]);
       stages.forEach(st => rows.push({ id: `${id} · ${st.key}`, name: st.name, style: "BAR", lane: lane.name, start: st.s, end: st.e, status: "Active", row: top + 1, y: NaN, fill: "", stroke: "", parent: id }));
       if (rec["~tiles"] !== false) g.acts.filter(t => !tilesDone.has(t.code) && p6PossType(t)).forEach(t => {
         tilesDone.add(t.code);
@@ -4323,6 +4328,7 @@ function p6BuildSummary(M, rec) {
     const m = mode(w), r = p6Roll(M, w);
     if (m === "hide" || m === "possess" || m === "ms" || !r.inc.length) return;
     if (m === "lane") lane = addLane(w.path, w.name);
+    if (lane) laneByPath.set(w.path, lane);
     if (m === "zone") {
       const style = /assur|safety|gate \d/i.test(w.name) ? "ZONE_ASSURE" : "ZONE_TC";
       if (r.s) rows.push({ id: "ZONE " + w.path, name: p6Short(w.name), style, lane: "", start: r.s, end: r.e, status: "Active", row: 0, y: NaN, fill: "", stroke: "" });
@@ -4330,7 +4336,8 @@ function p6BuildSummary(M, rec) {
     }
     if (m === "bar") {
       lane = lane || addLane(w.path.split(".")[0], (M.top.kids.find(k => k.path === w.path.split(".")[0]) || w).name);
-      rows.push({ id: "WBS " + w.path, name: p6Short(w.name), style: "BAR", lane: lane.name, start: r.s, end: r.e, status: "Active", row: take(lane, 1), y: NaN, fill: "", stroke: "", p6: { crit: crit(r.inc) }, acts: r.inc });
+      const brow = { id: "WBS " + w.path, name: p6Short(w.name), style: "BAR", lane: lane.name, start: r.s, end: r.e, status: "Active", row: take(lane, 1), y: NaN, fill: "", stroke: "", p6: { crit: crit(r.inc) }, acts: r.inc };
+      rows.push(brow); drawnBy.set(w.path, [brow]); laneByPath.set(w.path, lane);
       return;
     }
     if (m === "umbrella") return umbrella(w, lane);
@@ -4346,14 +4353,16 @@ function p6BuildSummary(M, rec) {
       };
       w.kids.forEach(collect);
       const id = "WBS " + w.path, boxTop = take(lane, 1), a = occOf(lane), inside = { id, minRow: boxTop + 1 };
-      rows.push({ id, name: p6Short(w.name), style: "SUMMARY_BOX", lane: lane.name, start: r.s, end: r.e, status: "Active", row: boxTop, y: NaN, fill: "", stroke: shade(col, .25), p6: { crit: crit(r.inc) }, acts: r.inc });
+      const boxRow = { id, name: p6Short(w.name), style: "SUMMARY_BOX", lane: lane.name, start: r.s, end: r.e, status: "Active", row: boxTop, y: NaN, fill: "", stroke: shade(col, .25), p6: { crit: crit(r.inc) }, acts: r.inc };
+      rows.push(boxRow); drawnBy.set(w.path, [boxRow]); laneByPath.set(w.path, lane);
       // umbrella rows first (ones that follow each other share rows), then the bars under them
       parts.filter(x => x.umb).forEach(({ k }) => umbrella(k, lane, inside));
       for (let i = inside.minRow; i < a.length; i++) a[i] = Infinity;
       inside.minRow = Math.max(inside.minRow, a.length);
       parts.filter(x => !x.umb).sort((x, y) => x.rk.s < y.rk.s ? -1 : 1).forEach(({ k, rk }) => {
         const name = p6Short(k.name), s0 = toDays(rk.s), e0 = toDays(rk.e) + (textW(name, 9, 500) + 16) / dayPx();
-        rows.push({ id: "WBS " + k.path, name, style: "BAR", lane: lane.name, start: rk.s, end: rk.e, status: "Active", row: place(lane, 1, s0, e0, inside.minRow), y: NaN, fill: tint(col, .5), stroke: "", parent: id, p6: { crit: crit(rk.inc) }, acts: rk.inc });
+        const prow = { id: "WBS " + k.path, name, style: "BAR", lane: lane.name, start: rk.s, end: rk.e, status: "Active", row: place(lane, 1, s0, e0, inside.minRow), y: NaN, fill: tint(col, .5), stroke: "", parent: id, p6: { crit: crit(rk.inc) }, acts: rk.inc };
+        rows.push(prow); drawnBy.set(k.path, [prow]);
       });
       if (a.length <= boxTop + 1) take(lane, 1);   // an empty box keeps a row
       for (let i = boxTop; i < a.length; i++) a[i] = Infinity;   // the box's rows are its own: nothing after it packs into them
@@ -4363,6 +4372,22 @@ function p6BuildSummary(M, rec) {
     w.kids.forEach(k => visit(k, lane));
   };
   M.top.kids.forEach(w => visit(w, null));
+  // milestones "on its row": on the stage row of the umbrella that holds them, the row of their bar, or a free row in their lane
+  for (const t of picked.filter(t => picks[t.code] === "here")) {
+    let w = t.wbs, hit = null, ln = null;
+    for (; w && !hit; w = w.parent) { hit = drawnBy.get(w.path) || null; ln = ln || laneByPath.get(w.path) || null; }
+    if (!hit && !ln) continue;   // its part of the WBS isn't on the sheet
+    const words = (hit ? hit.map(x => x.name) : []).concat([...(function* () { for (let x = t.wbs; x; x = x.parent) yield x.name; })()]);
+    const name = p6MsName(t.name, words), base = { id: t.code, name, style: "ML_Square", start: t.start, end: t.start, status: t.done ? "Complete" : "Active", y: NaN, fill: "", stroke: "", p6: { crit: crit([t]), tf: t.tf } };
+    if (hit) {
+      const fm = t.name.match(FACE_RE), h = hit.find(x => fm && x.face && x.face.toLowerCase() === fm[1].toLowerCase()) || hit[0];
+      const umb = h.style && /^U_/.test(h.style), box = h.style === "SUMMARY_BOX";
+      rows.push({ ...base, lane: h.lane, row: umb || box ? h.row + 1 : h.row, ...(umb || box ? { parent: h.id } : h.parent ? { parent: h.parent } : {}) });
+    } else {
+      const d = toDays(t.start); rows.push({ ...base, lane: ln.name, row: place(ln, 1, d - 4, d + (textW(name, 9, 500) + 30) / dayPx()) });
+    }
+  }
+  rows.forEach(r => delete r.face);
   // a gate covers the lanes of the work its logic ties it to (through other milestones), when that's only part of the sheet
   const laneOfTask = new Map();
   rows.forEach(r => { if (r.lane && r.acts) r.acts.forEach(t => laneOfTask.has(t.code) || laneOfTask.set(t.code, r.lane)); delete r.acts; });
@@ -4470,6 +4495,7 @@ function p6ApplyChoices(M, rec, set) {
 const p6Scenario = fname => fname.replace(/\.xer$/i, "").replace(/^[A-Z]{0,4}-?\d[\w-]*\s+/i, "").trim().toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
 const P6_MODES_SUMMARY = [["lane", "Lane"], ["group", "Summary box"], ["umbrella", "Umbrella row"], ["bar", "One bar"], ["split", "Not shown (its parts are)"], ["zone", "Zone (large label)"], ["ms", "Key dates"], ["possess", "Possession lane"], ["hide", "Leave out"]];
 // inside a summary box a part is an umbrella row (its stages below it) or a bar; or not shown, its own parts taking its place
+const P6_MS_CHOICES = [["off", "Not shown"], ["here", "On its row"], ["key", "Key dates lane"], ["gate", "Gate line"]];
 const P6_MODES_IN_BOX = [["umbrella", "Umbrella row"], ["bar", "One bar"], ["split", "Not shown (its parts are)"], ["hide", "Leave out"]];
 // what a part's own parts become when it's drawn as a whole (shown greyed in the tree, no choice to make)
 const P6_TAKEN = { umbrella: "in the umbrella row above", bar: "in the bar above", zone: "in the zone above", ms: "key dates are picked on the right", possess: "in the possession lane", hide: "left out with the part above" };
@@ -4557,7 +4583,8 @@ function openP6Builder(M, rec, fname, mode, from = null) {
     const rows = [], scroll = tree.scrollTop;
     const add = (w, ctx = {}) => {   // ctx: { taken: why it has no choice of its own } or { inBox: true }
       const r = p6Roll(M, w); if (!r.all.length) return;
-      const md = rec[w.path] || "hide", kidsHere = w.kids.some(k => p6Roll(M, k).all.length);
+      const md = rec[w.path] || "hide", ownMs = summary() && !ctx.keyDates && md !== "ms" ? M.tasks.filter(t => t.ms && t.wbs === w && (M.includeAll || !M.out.has(t))) : [];
+      const kidsHere = w.kids.some(k => p6Roll(M, k).all.length) || ownMs.length > 0;
       const here = !summary() ? modes : ctx.inBox ? P6_MODES_IN_BOX : modes;
       const extra = summary() && md === "umbrella" ? (() => {
         const how = (rec["~stages"] || {})[w.path] || p6StageMode(M, w), faces = p6Faces(r.work), split = (rec["~split"] || {})[w.path] !== false;
@@ -4572,8 +4599,14 @@ function openP6Builder(M, rec, fname, mode, from = null) {
       if (!open.has(w.path)) return;
       if (!summary()) { if (showKids(w) || md === "hide") w.kids.forEach(k => add(k)); return; }
       // what its parts can be: chosen one by one (lane, box, not shown), or taken by it (umbrella, bar, zone…)
-      const kidCtx = ctx.taken ? { taken: ctx.taken } : md === "group" ? { inBox: true } : md === "split" ? { inBox: !!ctx.inBox } : md === "lane" ? {} : { taken: P6_TAKEN[md] || "in the part above" };
+      const kidCtx = ctx.taken ? { taken: ctx.taken, keyDates: ctx.keyDates } : md === "group" ? { inBox: true } : md === "split" ? { inBox: !!ctx.inBox } : md === "lane" ? {} : { taken: P6_TAKEN[md] || "in the part above", keyDates: md === "ms" };
       w.kids.forEach(k => add(k, kidCtx));
+      // its own milestones: each can be picked, wherever it sits (an AFC milestone inside an umbrella, say)
+      const picks = rec["~ms"] || {};
+      ownMs.forEach(t => rows.push(`<div class="p6row p6msrow ${picks[t.code] ? "" : "off"}" style="--d:${w.depth}">
+        <span></span><span class="p6name" title="${esc(t.code)} · ${esc(t.name)}"><span class="p6title"><span class="p6dia" aria-hidden="true">◆</span> ${esc(t.name)}</span></span>
+        <span class="p6meta">${fmt(t.start)}<br>milestone</span>
+        <select data-ms="${esc(t.code)}" aria-label="What ${esc(t.name)} shows">${P6_MS_CHOICES.map(([v, n]) => `<option value="${v}" ${(picks[t.code] || "off") === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>`));
     };
     M.top.kids.forEach(add);
     tree.innerHTML = rows.join(""); tree.scrollTop = scroll;
@@ -4612,7 +4645,11 @@ function openP6Builder(M, rec, fname, mode, from = null) {
     drawPreview();
   };
   tree.addEventListener("change", e => {
-    const s = e.target.closest("[data-mode]"), st = e.target.closest("[data-stages]"), sp = e.target.closest("[data-split]");
+    const s = e.target.closest("[data-mode]"), st = e.target.closest("[data-stages]"), sp = e.target.closest("[data-split]"), ms = e.target.closest("[data-ms]");
+    if (ms) {   // a milestone picked from the tree; its key-dates role follows the pick
+      const all = { ...(rec["~ms"] || {}) }; if (ms.value === "off") delete all[ms.dataset.ms]; else all[ms.dataset.ms] = ms.value; rec["~ms"] = all;
+      if (rec["~dates"]) { const d = { ...rec["~dates"] }; delete d[ms.dataset.ms]; rec["~dates"] = d; }
+    }
     if (s) {
       rec[s.dataset.mode] = s.value; if (["lane", "split", "group"].includes(s.value)) open.add(s.dataset.mode);
       if (s.value === "group") { const w = M.nodes.find(x => x.path === s.dataset.mode); (w ? w.kids : []).forEach(k => { const n = p6Roll(M, k).work.length; if (!["umbrella", "bar", "split", "hide"].includes(rec[k.path])) rec[k.path] = n >= 3 ? "umbrella" : n ? "bar" : "hide"; }); }
@@ -4700,6 +4737,11 @@ function p6KeyOrder(M, built) {
 function p6OptCheck(id, on, title, what, when, none) {
   const tail = !on ? "" : when ? ` <span class="p6code">${when}</span>` : when === null && none ? ` <span class="warn">${none}</span>` : "";
   return `<label class="check p6opt"><input type="checkbox" id="${id}" ${on ? "checked" : ""}><span><b>${title}</b>${tail}<br><span class="note">${what}</span></span></label>`;
+}
+function p6MsName(name, context) {
+  const parts = String(name).split(/\s+[–—-]\s+/), low = context.map(c => String(c).toLowerCase());
+  while (parts.length > 1 && low.some(c => c.includes(parts[0].toLowerCase().replace(/^(northern|southern|eastern|western)\s+/, "")))) parts.shift();
+  return parts.join(" – ");
 }
 function p6FromNote(f) {
   if (f.justSaved) return `Choices saved as “${esc(f.name)}”.`;

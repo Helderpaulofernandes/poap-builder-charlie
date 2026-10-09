@@ -410,6 +410,27 @@ const TESTS = {
     T.ok(m && /Update from P6: T-100 OPTION A\.xer/.test(m.querySelector("h3").textContent), "the importer opens on the same file");
     T.ok(m.querySelector("#p6Tree [data-mode]"), "with the choices to change");
   },
+  "P6 summary: milestones picked from anywhere in the tree": async () => {
+    // the test file plus an AFC milestone inside Segment 1 (under Portion A)
+    const xer = T.xer().replace("%T\tTASKPRED", "%R\t95\t1\t109\t9\tAFC1\tPortion A - North / Metro - AFC Design - Drawings Issued\tTT_FinMile\tTK_NotStart\t2027-05-21 08:00\t2027-05-21 08:00\t0\tN\t0\tCP_Phys\r\n%T\tTASKPRED");
+    const M = p6Model(parseXer(xer)), rec = p6SuggestSummary(M);
+    rec["C"] = "lane"; rec["C.A"] = "umbrella"; rec["~stages"] = { "C.A": "wbs" };
+    rec["~ms"] = { AFC1: "here" };
+    let r = p6BuildSummary(M, rec).rows.find(x => x.id === "AFC1"), u = p6BuildSummary(M, rec).rows.find(x => x.id === "WBS C.A");
+    T.eq([r.parent, r.row, r.lane, r.name], ["WBS C.A", u.row + 1, u.lane, "AFC Design – Drawings Issued"], "on its umbrella's stage row, named without what the row already says");
+    rec["~ms"] = { AFC1: "key" };
+    r = p6BuildSummary(M, rec).rows.find(x => x.id === "AFC1");
+    T.eq(r.lane, "Key Dates", "or in the key dates lane");
+    rec["~ms"] = { AFC1: "gate" };
+    T.ok(p6BuildSummary(M, rec).rows.some(x => x.id === "GATE AFC1"), "or as a gate line");
+    // and the tree offers it under its WBS part, even inside an umbrella
+    await importP6(new File([xer], "T-100 OPTION A.xer"), "new");
+    const m = document.querySelector(".modal"), tog = k => { const t = m.querySelector(`[data-tog="${k}"]`); if (t && t.textContent.includes("▸")) t.click(); };
+    m.querySelector('[data-mode="C.A"]').value = "umbrella"; m.querySelector('[data-mode="C.A"]').dispatchEvent(new Event("change", { bubbles: true }));
+    tog("C"); tog("C.A"); tog("C.A.1");
+    const pick = m.querySelector('[data-ms="AFC1"]');
+    T.ok(pick && [...pick.options].map(o => o.value).join() === "off,here,key,gate", "the milestone can be picked in the tree");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));
