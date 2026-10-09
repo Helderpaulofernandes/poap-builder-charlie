@@ -1879,21 +1879,28 @@ function syncContainers(p, opts = {}) {
       const grow = c.span - before, from = c.row + before, own = new Set(descendants(p, c).map(k => k.id));
       // an umbrella inside a box pushes only the box's other contents; the box then grows and pushes what's below it
       const outer = c.parent && byId.get(c.parent), within = outer ? new Set(descendants(p, outer).map(k => k.id)) : null;
-      // only what's underneath it moves: things whose dates overlap it, each summary with everything in it as one block.
-      // Umbrellas and bars beside it on the same rows (at other dates) stay where they are.
+      // only what it now runs into moves, and only as far as it has to: each summary moves as one block with everything in
+      // it; blank rows below take the growth first, and things beside it (other dates) aren't touched
       const top = i => { let r = i; for (let n = 0; n < 3 && r.parent; n++) { const q = byId.get(r.parent); if (!q || q === outer) break; r = q; } return r; };
-      const s0 = toDays(c.start), e0 = toDays(c.end);
-      const under = i => toDays(i.end) >= s0 && toDays(i.start) <= e0;
-      const moving = new Set();
+      const blocks = new Map();   // block top -> its members
       p.items.forEach(i => {
-        if (i === c || own.has(i.id) || (within && !within.has(i.id)) || i.lane !== c.lane || isCurtain(p, i.style) || i.row < from) return;
-        const t = top(i);
-        if (t === c || own.has(t.id)) return;
-        if (under(t)) moving.add(i);
+        if (i === c || own.has(i.id) || (within && !within.has(i.id)) || i.lane !== c.lane || isCurtain(p, i.style)) return;
+        const t = top(i); if (t === c || own.has(t.id)) return;
+        (blocks.get(t) || blocks.set(t, []).get(t)).push(i);
       });
-      // a block that moves takes all of it along (stages above the line included), so it stays in one piece
-      const blocks = new Set([...moving].map(top));
-      p.items.forEach(i => { if (i !== c && !own.has(i.id) && i.lane === c.lane && !isCurtain(p, i.style) && (moving.has(i) || (blocks.has(top(i)) && top(i).row >= from))) i.row += grow; });
+      const ext = (t, ms) => ({ r0: Math.min(...ms.map(i => i.row)), r1: Math.max(...ms.map(i => bottomOf(p, i))), s: Math.min(...ms.map(i => toDays(i.start))), e: Math.max(...ms.map(i => toDays(i.end))) });
+      const hits = (a, b) => a.r0 <= b.r1 && b.r0 <= a.r1 && a.s <= b.e + 1 && b.s <= a.e + 1;
+      const fam = [c, ...kids], placed = [{ r0: c.row, r1: c.row + c.span - 1, s: Math.min(...fam.map(i => toDays(i.start))), e: Math.max(...fam.map(i => toDays(i.end))) }];
+      [...blocks].map(([t, ms]) => ({ ms, x: ext(t, ms) })).filter(b => b.x.r0 >= c.row).sort((a, b) => a.x.r0 - b.x.r0 || a.x.s - b.x.s).forEach(b => {
+        let d = 0;
+        for (let guard = 0; guard < 500; guard++) {
+          const at = { ...b.x, r0: b.x.r0 + d, r1: b.x.r1 + d }, o = placed.find(q => hits(at, q));
+          if (!o) break;
+          d += o.r1 - at.r0 + 1;
+        }
+        if (d) b.ms.forEach(i => i.row += d);
+        placed.push({ ...b.x, r0: b.x.r0 + d, r1: b.x.r1 + d });
+      });
     }
     if (c.fitChildren !== false && kids.length) {
       c.start = fromDays(Math.min(...kids.map(i => toDays(i.start)))); c.end = fromDays(Math.max(...kids.map(i => toDays(i.end))));
