@@ -1205,9 +1205,13 @@ function drawCurtainShades(svg, curtains, L, opts = {}, F = { font: sheetFace() 
     if (kind === "gate") {   // a key date: a full-height line with its name running up beside it
       const x = L.x(it.start) + L.ppd / 2;
       el("line", { x1: x, x2: x, y1, y2: yEnd, stroke: fill, "stroke-width": 2.2 }, g);
-      const size = 15, ty = y1 + 8;
-      el("text", { x: x - 4, y: ty, transform: `rotate(-90 ${x - 4} ${ty})`, "text-anchor": "end", fill, "font-size": size, "font-weight": 500, "font-family": F.font }, g, it.name);
-      if (!opts.print) el("rect", { x: x - 9, y: y1, width: 12, height: Math.min(h, textW(it.name, size, 500) + 16), fill: "transparent", "data-id": it.id, "data-part": "body", style: "cursor:grab" }, hits);
+      // the name runs up beside the line: at its top, middle or bottom (tag alignment), in the tag's size and text colour
+      const f = tagFmt(it, st), size = { S: 12, M: 15, L: 18 }[f.tagSize] || 15, lw = textW(it.name, size, 500);
+      const at = f.tagAlign === "centre" ? "middle" : f.tagAlign === "right" ? "bottom" : "top";
+      const ty = at === "top" ? y1 + 8 : at === "bottom" ? yEnd - 8 : (y1 + yEnd) / 2;
+      const labelTop = at === "top" ? ty : at === "bottom" ? ty - lw : ty - lw / 2;
+      el("text", { x: x - 4, y: ty, transform: `rotate(-90 ${x - 4} ${ty})`, "text-anchor": at === "top" ? "end" : at === "bottom" ? "start" : "middle", fill: f.tagText || fill, "font-size": size, "font-weight": 500, "font-family": F.font }, g, it.name);
+      if (!opts.print) el("rect", { x: x - 6 - size, y: Math.max(y1, labelTop - 4), width: size + 9, height: Math.min(h, lw + 8), fill: "transparent", "data-id": it.id, "data-part": "body", style: "cursor:grab" }, hits);
       if (selected) el("rect", { x: x - 10, y: y1, width: 14, height: h, fill: "none", stroke: BRAND.orange, "stroke-width": 1.6 }, g);
       continue;
     }
@@ -2986,9 +2990,15 @@ const TAG_CHOICES = {
   tagSize: [["S", "S"], ["M", "M"], ["L", "L"]],
   tagStyle: [["pill", "Filled"], ["outline", "Outlined"], ["text", "Text only"]],
 };
-function tagControls(f) {
-  const seg = (key, label) => `<div class="f"><label>${label}</label><div class="seg" role="group" aria-label="${label}">${TAG_CHOICES[key].map(([v, n]) =>
-    `<button type="button" data-tag="${key}" data-val="${v}" aria-pressed="${f[key] === v}">${n}</button>`).join("")}</div></div>`;
+function tagControls(f, kind) {
+  const seg = (key, label, names) => `<div class="f"><label>${label}</label><div class="seg" role="group" aria-label="${label}">${TAG_CHOICES[key].map(([v, n]) =>
+    `<button type="button" data-tag="${key}" data-val="${v}" aria-pressed="${f[key] === v}">${names ? names[v] : n}</button>`).join("")}</div></div>`;
+  // a key-date line: its name runs up beside the line, at the top, middle or bottom of it
+  if (kind === "gate") return `<div class="tagfmt">
+    <div class="row2">${seg("tagAlign", "Label along the line", { left: "Top", centre: "Middle", right: "Bottom" })}${seg("tagSize", "Label size")}</div>
+    <div class="f"><label for="tagText">Label colour</label><input id="tagText" type="color" value="${f.tagText || f.lineColour}"></div>
+    ${f.tagText ? `<p class="note"><a href="#" id="tagAuto">Same colour as the line</a></p>` : ""}
+  </div>`;
   return `<div class="tagfmt">
     ${seg("tagPos", "Tag position")}
     <p class="note">Strip keeps tags in their own band under the timeline, clear of milestones and bars.</p>
@@ -3003,7 +3013,7 @@ function tagControls(f) {
 }
 function bindTagControls(root, set) {
   root.querySelectorAll("[data-tag]").forEach(b => b.onclick = () => set(b.dataset.tag, b.dataset.val));
-  root.querySelector("#tagFill").onchange = e => set("tagFill", e.target.value.toUpperCase());
+  const fillIn = root.querySelector("#tagFill"); if (fillIn) fillIn.onchange = e => set("tagFill", e.target.value.toUpperCase());
   root.querySelector("#tagText").onchange = e => set("tagText", e.target.value.toUpperCase());
   const auto = root.querySelector("#tagAuto"); if (auto) auto.onclick = e => { e.preventDefault(); set("tagFill", ""); set("tagText", ""); };
 }
@@ -3054,7 +3064,7 @@ function renderCurtainSide(side, cur) {
       <div class="f"><label for="cStroke">Tag &amp; edges</label><input id="cStroke" type="color" value="${stroke}"></div>
     </div>
     ${coverControls(cur)}
-    ${tagControls(tagFmt(cur, st))}
+    ${tagControls({ ...tagFmt(cur, st), lineColour: fill }, curtainKind(P, cur))}
     <p class="note">${cur.fill || cur.stroke || cur.opacity != null || TAG_KEYS.some(k => cur[k] != null) ? `Custom look for this curtain · <a href="#" id="cReset">use the type's</a>` : `Uses the “${esc(st.notes)}” type's colours, shading and tag format.`}</p>
     <div class="f"><label for="cId">ShapeID</label><input id="cId" value="${esc(cur.id)}"></div>
     <div class="actions"><button class="btn" id="cDup">Duplicate</button><button class="btn danger" id="cDel">Delete</button></div>
@@ -3115,7 +3125,7 @@ function renderTypeSide(side, s) {
     ${bar ? `<label class="check"><input type="checkbox" id="sLane" ${s.fill ? "" : "checked"}> Use the lane colour</label>` : ""}
     ${curtain ? `<div class="f"><label for="sOpacity">Shading: <span id="sPct">${pct}%</span></label><input id="sOpacity" type="range" min="0" max="70" step="1" value="${pct}" style="accent-color:${s.fill}"></div>
       <div class="f"><label for="sDays">Duration in the tag</label><select id="sDays">${DAYS_OPTIONS.map(([k, n]) => `<option value="${k}" ${k === (s.days || "") ? "selected" : ""}>${n}</option>`).join("")}</select></div>
-      ${tagControls(tagFmt({}, s))}
+      ${tagControls({ ...tagFmt({}, s), lineColour: s.fill || BRAND.navy }, s.shape === "gate" ? "gate" : "")}
       <p class="note">These are the defaults for every curtain of this type; a curtain can override them.</p>` : ""}
     <div class="row2">
       <div class="f"><label for="sFill">${curtain ? "Shade colour" : "Fill"}</label><input id="sFill" type="color" value="${s.fill || laneBar(BRAND.orange)}" ${bar && !s.fill ? "disabled" : ""}></div>

@@ -337,6 +337,24 @@ const TESTS = {
     selectItems(["WBS C", "WBS D.1"]); const mx = document.getElementById("mxLane"); mx.value = lane2; mx.dispatchEvent(new Event("change"));
     T.ok([T.item("WBS C"), ...descendants(P, T.item("WBS C")), T.item("WBS D.1")].every(k => k.lane === lane2), "Move to lane takes the box's contents too");
   },
+  "A gate's label follows its alignment, size and colour": () => {
+    const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
+    const l = newLane(p, "Work"); p.items.push({ id: "B", name: "B", style: "BAR", lane: l.id, start: "2027-02-01", end: "2027-03-01", status: "Active", row: 0, fill: "", stroke: "" });
+    p.items.push({ id: "G", name: "Station Closure", style: "GATE", lane: "", start: "2027-04-01", end: "2027-04-01", status: "Active", row: 0, fill: "", stroke: "" });
+    loadDoc(p, null);
+    const label = () => [...document.querySelectorAll("#chart text")].find(t => t.textContent === "Station Closure");
+    const [y1, y2] = curtainY(T.item("G"), LAY);
+    T.eq([label().getAttribute("text-anchor"), +label().getAttribute("y")], ["end", y1 + 8], "top by default");
+    sel = { type: "item", id: "G" }; render(); renderSide();
+    const btn = (k, v) => document.querySelector(`#side [data-tag="${k}"][data-val="${v}"]`);
+    T.ok(btn("tagAlign", "right") && /Bottom/.test(btn("tagAlign", "right").textContent) && !document.querySelector('#side [data-tag="tagPos"]'), "gate controls: top / middle / bottom, no tag strip");
+    btn("tagAlign", "right").click();
+    T.eq([label().getAttribute("text-anchor"), +label().getAttribute("y")], ["start", y2 - 8], "Bottom puts it at the foot of the line");
+    btn("tagAlign", "centre").click(); T.eq(+label().getAttribute("y"), (y1 + y2) / 2, "Middle");
+    btn("tagSize", "L").click(); T.eq(label().getAttribute("font-size"), "18", "size");
+    const c = document.getElementById("tagText"); c.value = "#123456"; c.dispatchEvent(new Event("change"));
+    T.eq(label().getAttribute("fill"), "#123456", "colour");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));
