@@ -3020,8 +3020,8 @@ function itemExtras(cur) {
       ${cur.titleAlign || cur.titleSize || cur.titleWeight || cur.titleColour || (isUmbrella(P, cur) && cur.labelMode) ? `<p class="note"><a href="#" id="cTitleReset">Default title</a></p>` : ""}
     </div>`;
     const sets = cur.stageSets, stageCtl = sets ? `<div class="tagfmt">
-      <div class="f"><label>Stages</label><div class="seg" role="group" aria-label="Stages from">${[["keywords", "By type of work"], ["wbs", "From its WBS"]].map(([v, n]) => `<button type="button" data-stagesby="${v}" aria-pressed="${(cur.stagesBy || "keywords") === v}" ${(sets[v] || []).length ? "" : "disabled title='Nothing to make stages from this way'"}>${n}</button>`).join("")}</div></div>
-      <p class="note">${(sets.keywords || []).length} by type of work · ${(sets.wbs || []).length} from its WBS. Switching replaces this umbrella's stage bars (possession tiles stay)${cur.p6path && P.items.some(i => i !== cur && isUmbrella(P, i) && i.p6path === cur.p6path) ? ", and its other face's, which comes from the same WBS part" : ""}.</p>
+      <div class="f"><label>Stages</label><div class="seg" role="group" aria-label="Stages from">${[["keywords", "By type of work"], ["wbs", "From its WBS"], ["acts", "Its activities"]].filter(([v]) => v !== "acts" || sets.acts).map(([v, n]) => `<button type="button" data-stagesby="${v}" aria-pressed="${(cur.stagesBy || "keywords") === v}" ${(sets[v] || []).length ? "" : "disabled title='Nothing to make stages from this way'"}>${n}</button>`).join("")}</div></div>
+      <p class="note">${(sets.keywords || []).length} by type of work · ${(sets.wbs || []).length} from its WBS${sets.acts ? ` · ${sets.acts.length} activities` : ""}. Switching replaces this umbrella's stage bars (possession tiles stay)${cur.p6path && P.items.some(i => i !== cur && isUmbrella(P, i) && i.p6path === cur.p6path) ? ", and its other face's, which comes from the same WBS part" : ""}.</p>
     </div>` : "";
     return `${groupPick}${titleCtl}${stageCtl}<div class="tagfmt">
       <div class="actions"><button class="btn primary" id="cCollapse">${cur.collapsed ? "Expand" : "Collapse"}</button><span class="note">${kids.length} item${kids.length === 1 ? "" : "s"} inside${cur.collapsed ? ", hidden" : ""}</span></div>
@@ -3065,7 +3065,8 @@ function bindItemExtras(cur) {
       const old = new Set(containerChildren(p, u).filter(k => k.id.startsWith(u.id + " · ")).map(k => k.id));
       p.items = p.items.filter(i => !old.has(i.id));
       p.items.forEach(i => { if (i.preds) i.preds = i.preds.filter(r => !old.has(r.id)); });
-      set.forEach(st => p.items.push({ id: `${u.id} · ${st.key}`, name: st.name, style: "BAR", lane: u.lane, start: st.s, end: st.e, status: "Active", row: u.row + 1, fill: "", stroke: "", parent: u.id }));
+      // (overlapping activities take more rows: the umbrella grows and what's below it moves down, as summaries do)
+      set.forEach(st => p.items.push({ id: `${u.id} · ${st.key}`, name: st.name, style: "BAR", lane: u.lane, start: st.s, end: st.e, status: "Active", row: u.row + 1 + (st.lvl || 0), fill: "", stroke: "", parent: u.id }));
       u.stagesBy = how;
     }
     if (p.p6 && p.p6.recipe && me.p6path) p.p6.recipe["~stages"] = { ...(p.p6.recipe["~stages"] || {}), [me.p6path]: how };
@@ -4200,6 +4201,14 @@ function chainStages(groups) {
   return out;
 }
 function p6Stages(M, w, acts, how, design) {
+  if (how === "acts") {   // its activities themselves: one bar each, a row shared by those that follow each other (lvl = row under the first)
+    const ctx = []; for (let x = w; x; x = x.parent) ctx.push(x.name);
+    const ends = [];
+    return acts.slice().sort((a, b) => a.start < b.start ? -1 : a.start > b.start ? 1 : a.end < b.end ? -1 : 1).map(t => {
+      let lvl = ends.findIndex(e => toDays(e) < toDays(t.start)); if (lvl < 0) { lvl = ends.length; ends.push(t.end); } else ends[lvl] = t.end;
+      return { key: t.code, name: p6MsName(t.name, ctx), s: t.start, e: t.end, lvl };
+    });
+  }
   if (how === "wbs") {
     const g = w.kids.map(k => { const ks = acts.filter(t => p6Under(t.wbs, k)); return ks.length ? { name: p6Short(k.name).replace(FACE_RE, "").trim(), key: k.code, ...p6Span(ks) } : null; });
     return chainStages(g);
@@ -4370,18 +4379,21 @@ function p6BuildSummary(M, rec) {
     const groups = faces.length >= 2 ? faces.map(f => ({ face: f, acts: acts.filter(t => { const m = t.name.match(FACE_RE); return !m || m[1].toLowerCase() === f.toLowerCase(); }) })) : [{ face: "", acts }];
     for (const g of groups) {
       const id = "WBS " + w.path + (g.face ? " " + g.face[0] : "");
-      let stages = p6Stages(M, w, g.acts, how, design), by = how;
+      // (as activities: possession works stay tiles when tiles are on)
+      const ownActs = rec["~tiles"] !== false ? g.acts.filter(t => !p6PossType(t)) : g.acts;
+      let stages = p6Stages(M, w, how === "acts" ? ownActs : g.acts, how, design), by = how;
       if (stages.length < 2 && how === "keywords") { stages = p6Stages(M, w, g.acts, "wbs", design); by = "wbs"; }
-      const slim = a => a.map(x => ({ key: x.key, name: x.name, s: x.s, e: x.e }));
-      const stageSets = { keywords: slim(by === "keywords" ? stages : p6Stages(M, w, g.acts, "keywords", design)), wbs: slim(by === "wbs" ? stages : p6Stages(M, w, g.acts, "wbs", design)) };
+      const slim = a => a.map(x => ({ key: x.key, name: x.name, s: x.s, e: x.e, ...(x.lvl ? { lvl: x.lvl } : {}) }));
+      const stageSets = { keywords: slim(by === "keywords" ? stages : p6Stages(M, w, g.acts, "keywords", design)), wbs: slim(by === "wbs" ? stages : p6Stages(M, w, g.acts, "wbs", design)), acts: slim(by === "acts" ? stages : p6Stages(M, w, ownActs, "acts", design)) };
+      const extraRows = Math.max(0, ...stages.map(x => x.lvl || 0));   // activities that overlap take more rows
       const sp = p6Span(g.acts), s = stages.length ? stages[0].s : sp.s, e = stages.length ? stages.reduce((m, x) => x.e > m ? x.e : m, sp.e) : sp.e;
       const name = (g.face ? g.face + " " : "") + p6Short(w.name).replace(/^(southern|northern|eastern|western)\s+/i, "");
       const tiles = rec["~tiles"] !== false && g.acts.some(t => !tilesDone.has(t.code) && p6PossType(t));
       const half = Math.max(0, (textW(name, 9, 700) + 24) / dayPx() - (toDays(e) - toDays(s))) / 2;
-      const top = place(lane, tiles ? 3 : 2, toDays(s) - half - 14, toDays(e) + half + 14, box ? box.minRow : 0);
+      const top = place(lane, (tiles ? 3 : 2) + extraRows, toDays(s) - half - 14, toDays(e) + half + 14, box ? box.minRow : 0);
       const urow = { id, name, style: p6UStyle(w, design), lane: lane.name, start: s, end: e, status: "Active", row: top, y: NaN, fill: "", stroke: "", p6: { crit: crit(g.acts) }, acts: g.acts, ...(box ? { parent: box.id } : {}), x: { p6path: w.path, stagesBy: by, stageSets }, face: g.face };
       rows.push(urow); drawnBy.set(w.path, [...(drawnBy.get(w.path) || []), urow]);
-      stages.forEach(st => rows.push({ id: `${id} · ${st.key}`, name: st.name, style: "BAR", lane: lane.name, start: st.s, end: st.e, status: "Active", row: top + 1, y: NaN, fill: "", stroke: "", parent: id }));
+      stages.forEach(st => rows.push({ id: `${id} · ${st.key}`, name: st.name, style: "BAR", lane: lane.name, start: st.s, end: st.e, status: "Active", row: top + 1 + (st.lvl || 0), y: NaN, fill: "", stroke: "", parent: id }));
       if (rec["~tiles"] !== false) g.acts.filter(t => !tilesDone.has(t.code) && p6PossType(t)).forEach(t => {
         tilesDone.add(t.code);
         rows.push({ id: t.code, name: p6Caption(t.name), style: p6PossType(t), lane: lane.name, start: t.start, end: t.end, status: "Active", row: top + 1, y: NaN, fill: "", stroke: "", parent: id, labelMode: "below", x: { note: t.name } });
@@ -4827,7 +4839,7 @@ function openP6Builder(M, rec, fname, mode, from = null) {
       const here = !summary() ? modes : ctx.inBox ? P6_MODES_IN_BOX : modes;
       const extra = summary() && md === "umbrella" ? (() => {
         const how = (rec["~stages"] || {})[w.path] || p6StageMode(M, w), faces = p6Faces(r.work), split = (rec["~split"] || {})[w.path] !== false;
-        return `<span class="p6opts"><select data-stages="${esc(w.path)}" aria-label="Stages from"><option value="keywords" ${how === "keywords" ? "selected" : ""}>Stages by type of work</option><option value="wbs" ${how === "wbs" ? "selected" : ""}>Stages from its WBS</option></select>
+        return `<span class="p6opts"><select data-stages="${esc(w.path)}" aria-label="Stages from"><option value="keywords" ${how === "keywords" ? "selected" : ""}>Stages by type of work</option><option value="wbs" ${how === "wbs" ? "selected" : ""}>Stages from its WBS</option><option value="acts" ${how === "acts" ? "selected" : ""}>Its activities</option></select>
           ${faces.length >= 2 ? `<label class="check" title="One umbrella per side, in a lane of its own"><input type="checkbox" data-split="${esc(w.path)}" ${split ? "checked" : ""}> ${faces.join(" / ")}</label>` : ""}</span>`;
       })() : "";
       rows.push(`<div class="p6row ${md === "hide" || ctx.taken ? "off" : ""}" style="--d:${w.depth - 1}">

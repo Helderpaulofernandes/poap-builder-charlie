@@ -567,6 +567,21 @@ const TESTS = {
     pv.querySelector("[data-act=apply]").click();
     T.eq([P.lanes.find(l => l.id === T.item("WBS C.B").lane).name, P.lanes.some(l => l.name === "Construction" || l.name === "Design")], ["Works North", false], "it went into the renamed lane");
   },
+  "An umbrella can show its activities underneath": () => {
+    const M = p6Model(parseXer(T.xer())), rec = p6SuggestSummary(M);
+    rec["C"] = "lane"; rec["C.B"] = "umbrella"; rec["~stages"] = { "C.B": "acts" };
+    const { p } = p6MakeProject(M, rec, "T-100 OPTION A.xer"); loadDoc(p, null);
+    const u = T.item("WBS C.B"), acts = containerChildren(P, u);
+    T.eq([u.stagesBy, acts.length], ["acts", 5], "one bar per activity of Portion B");
+    T.ok(acts.every(k => k.row > u.row) && new Set(acts.map(k => k.row)).size === 1, "activities that follow each other share the row under it");
+    // and from the side panel: back to WBS stages, and to activities again
+    sel = { type: "item", id: "WBS C.B" }; render(); renderSide();
+    document.querySelector('#side [data-stagesby="wbs"]').click();
+    T.eq(containerChildren(P, T.item("WBS C.B")).map(k => k.name), ["Segment 3"], "WBS stages");
+    sel = { type: "item", id: "WBS C.B" }; render(); renderSide();
+    document.querySelector('#side [data-stagesby="acts"]').click();
+    T.eq(containerChildren(P, T.item("WBS C.B")).length, 5, "its activities again");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));
