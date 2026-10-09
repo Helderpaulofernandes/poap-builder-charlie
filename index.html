@@ -3021,6 +3021,8 @@ function itemExtras(cur) {
     </div>`;
     const sets = cur.stageSets, stageCtl = sets ? `<div class="tagfmt">
       <div class="f"><label>Stages</label><div class="seg" role="group" aria-label="Stages from">${[["keywords", "By type of work"], ["wbs", "From its WBS"], ["acts", "Its activities"]].filter(([v]) => v !== "acts" || sets.acts).map(([v, n]) => `<button type="button" data-stagesby="${v}" aria-pressed="${(cur.stagesBy || "keywords") === v}" ${(sets[v] || []).length ? "" : "disabled title='Nothing to make stages from this way'"}>${n}</button>`).join("")}</div></div>
+      ${(() => { const by = cur.stagesBy || "keywords", want = (sets[by] || []).length, have = containerChildren(P, cur).filter(k => k.id.startsWith(cur.id + " · ")).length;
+        return want && have < want ? `<div class="actions"><button class="btn" id="cRestore" title="Put back the ${by === "acts" ? "activities" : "stages"} as they came from P6">Restore its ${by === "acts" ? "activities" : "stages"} (${want - have} missing)</button></div>` : ""; })()}
       <p class="note">${(sets.keywords || []).length} by type of work · ${(sets.wbs || []).length} from its WBS${sets.acts ? ` · ${sets.acts.length} activities` : ""}. Switching replaces this umbrella's stage bars (possession tiles stay)${cur.p6path && P.items.some(i => i !== cur && isUmbrella(P, i) && i.p6path === cur.p6path) ? ", and its other face's, which comes from the same WBS part" : ""}.</p>
     </div>` : "";
     return `${groupPick}${titleCtl}${stageCtl}<div class="tagfmt">
@@ -3072,6 +3074,14 @@ function bindItemExtras(cur) {
     if (p.p6 && p.p6.recipe && me.p6path) p.p6.recipe["~stages"] = { ...(p.p6.recipe["~stages"] || {}), [me.p6path]: how };
     syncContainers(p);
   }, true));
+  // put back the stage bars (or activities) deleted from an umbrella, as they came from P6; the ones still there stay as they are
+  if ($("cRestore")) $("cRestore").onclick = () => commit(p => {
+    const u = p.items.find(i => i.id === cur.id), set = (u.stageSets || {})[u.stagesBy || "keywords"] || [];
+    const have = new Set(p.items.map(i => i.id));
+    set.forEach(st => { const id = `${u.id} · ${st.key}`; if (!have.has(id)) p.items.push({ id, name: st.name, style: "BAR", lane: u.lane, start: st.s, end: st.e, status: "Active", row: u.row + 1 + (st.lvl || 0), fill: "", stroke: "", parent: u.id }); });
+    if (p.p6 && p.p6.ids) p.p6.ids = [...new Set(p.p6.ids)];   // (they're known P6 items already)
+    syncContainers(p);
+  }, true);
   if ($("cTitleCol")) $("cTitleCol").onchange = e => upd(x => x.titleColour = e.target.value.toUpperCase());
   if ($("cTitleReset")) $("cTitleReset").onclick = e => { e.preventDefault(); upd(x => ["titleAlign", "titleSize", "titleWeight", "titleColour", ...(isUmbrella(P, x) ? ["labelMode"] : [])].forEach(k => delete x[k])); };
   const lastRow = x => { const k = containerChildren(P, x); return k.length ? Math.max(...k.map(i => i.row)) : x.row; };

@@ -582,6 +582,18 @@ const TESTS = {
     document.querySelector('#side [data-stagesby="acts"]').click();
     T.eq(containerChildren(P, T.item("WBS C.B")).length, 5, "its activities again");
   },
+  "Restore an umbrella's deleted stages from the side panel": () => {
+    const M = p6Model(parseXer(T.xer())), rec = p6SuggestSummary(M);
+    rec["C"] = "lane"; rec["C.B"] = "umbrella"; rec["~stages"] = { "C.B": "acts" };
+    loadDoc(p6MakeProject(M, rec, "T-100 OPTION A.xer").p, null);
+    const kids = () => containerChildren(P, T.item("WBS C.B")), keep = kids()[0];
+    commit(p => p.items.find(i => i.id === keep.id).name = "Kept and renamed", true);
+    deleteItems(kids().slice(1).map(k => k.id));
+    sel = { type: "item", id: "WBS C.B" }; render(); renderSide();
+    const b = document.getElementById("cRestore"); T.ok(b && /4 missing/.test(b.textContent), "it offers to put back the missing ones");
+    b.click();
+    T.eq([kids().length, T.item(keep.id).name], [5, "Kept and renamed"], "all back; the one still there is left as it was");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));
