@@ -1498,10 +1498,28 @@ function planLabels(L) {
       if (isMs(P, i.style)) { const w = textW(i.name, 9, 500) + 30 + (inlineMsDate() ? textW("  00-Mmm-00", 8.5, 400) : 0); take(occ, i.row, x - G.ms, x + w); take(msOcc, i.row, x - G.ms, x + w); }
       else take(occ, i.row, x, L.x(i.end) + L.ppd);
     }
+    // every umbrella bar first, so a title placed beside one never runs into a neighbour that comes later
+    containers.filter(c => isUmbrella(P, c)).forEach(c => take(occ, c.row, L.x(c.start), L.x(c.end) + L.ppd));
     // summary titles: to the left of the bracket when there's room, otherwise to its right
     for (const c of containers) {
       const tf = titleFmt(P, c), x1 = L.x(c.start), x2 = L.x(c.end) + L.ppd, tw = textW(c.name, 8.5 * tf.scale, tf.weight) + (L.print ? 0 : 12);
-      if (styleOf(P, c.style).shape === "container-box" || isUmbrella(P, c)) { take(occ, c.row, x1, x2); out.set(c.id, { titleSide: "inside" }); continue; }
+      if (isUmbrella(P, c)) {
+        const h = Math.max(10, G.rowH - 3), fs = umbTitleSize(tf, h), title = c.name + (c.collapsed && !L.print ? `  (${containerChildren(P, c).length})` : "");
+        const ttw = textW(title, fs, tf.weight), ow = textW(title, Math.min(fs, 9.5), tf.weight), want = c.labelMode || "auto";
+        take(occ, c.row, x1, x2);
+        let mode = want;
+        if (want === "auto") {
+          if (ttw + 12 <= x2 - x1) mode = "inside";
+          else if (x2 + 6 + ow <= L.W - 4 && free(occ, c.row, x2 + 4, x2 + 6 + ow)) mode = "right";   // (clear of the umbrella's own bar)
+          else if (x1 - 6 - ow >= G.headW + 4 && free(occ, c.row, x1 - 6 - ow, x1 - 4)) mode = "left";
+          else mode = "key";
+        }
+        if (mode === "right") take(occ, c.row, x2, x2 + 6 + ow); else if (mode === "left") take(occ, c.row, x1 - 6 - ow, x1);
+        const plan = { titleSide: "inside", mode, auto: want === "auto", fs, ow: Math.min(fs, 9.5) };
+        if (mode === "key") { plan.n = keyList.length + 1; keyList.push({ n: plan.n, name: c.name }); }
+        out.set(c.id, plan); continue;
+      }
+      if (styleOf(P, c.style).shape === "container-box") { take(occ, c.row, x1, x2); out.set(c.id, { titleSide: "inside" }); continue; }
       if (tf.align === "centre") { take(occ, c.row, x1, x2); out.set(c.id, { titleSide: "centre" }); continue; }
       const leftEdge = Math.max(G.headW + 4, ...(occ.get(c.row) || []).filter(([, b]) => b <= x1 + 1).map(([, b]) => b + 4));
       const side = tf.align === "left" || tf.align === "right" ? tf.align : x1 - 7 - tw >= leftEdge && free(occ, c.row, x1 - 7 - tw, x1) ? "left" : "right";
@@ -1631,12 +1649,16 @@ function drawUmbrella(g, it, ln, L, opts, F) {
   const grp = el("g", { "data-id": it.id }, g);
   const h = Math.max(10, G.rowH - 3), y = top + (G.rowH - h) / 2;
   el("rect", { x: x1, y, width: w, height: h, fill: col, stroke, "stroke-width": .8, "pointer-events": "none" }, grp);
-  const tf = titleFmt(P, it), room = tf.align === "centre" ? w - 8 : w - 22;
-  let size = { S: Math.min(11, h * .62), M: Math.min(15, h * .8), L: Math.min(18, h * .98) }[tf.size] || Math.min(15, h * .8);
-  const title = it.name + (it.collapsed && !opts.print ? `  (${kids.length})` : "");
-  while (size > 6 && textW(title, size, tf.weight) > room) size -= .5;
-  const at = tf.align === "left" ? ["start", x1 + 16] : tf.align === "right" ? ["end", x2 - 6] : ["middle", x1 + w / 2];
-  el("text", { x: at[1], y: y + h / 2 + size * .36, "text-anchor": at[0], fill: tf.colour || textOn(col), "font-size": size, "font-weight": tf.weight, "font-family": F.font, "pointer-events": "none" }, grp, title);
+  // the title where the label plan put it: inside (aligned), beside, above, as a key number, or not at all
+  const tf = titleFmt(P, it), plan = L.labels?.get(it.id) || { mode: "inside", fs: umbTitleSize(tf, h) }, size = plan.fs || umbTitleSize(tf, h);
+  const title = it.name + (it.collapsed && !opts.print ? `  (${kids.length})` : ""), out = { fill: tf.colour || BRAND.navy, "font-size": plan.ow || 9.5, "font-weight": tf.weight, "font-family": F.font, "pointer-events": "none" };
+  if (plan.mode === "inside") {
+    const at = tf.align === "left" ? ["start", x1 + 16] : tf.align === "right" ? ["end", x2 - 6] : ["middle", x1 + w / 2];
+    el("text", { x: at[1], y: y + h / 2 + size * .36, "text-anchor": at[0], fill: tf.colour || textOn(col), "font-size": size, "font-weight": tf.weight, "font-family": F.font, "pointer-events": "none" }, grp, title);
+  } else if (plan.mode === "right") el("text", { x: x2 + 5, y: y + h / 2 + (plan.ow || 9.5) * .36, ...out }, grp, title);
+  else if (plan.mode === "left") el("text", { x: x1 - 5, y: y + h / 2 + (plan.ow || 9.5) * .36, "text-anchor": "end", ...out }, grp, title);
+  else if (plan.mode === "above") el("text", { x: x1 + 1, y: y - 2.2, ...out, "font-size": ABOVE_FONT, "font-weight": 600 }, grp, title);
+  else if (plan.mode === "key") keyBadge(grp, x1 + Math.min(9, w / 2), y + h / 2, plan.n, F, stroke);
   if (!open) kids.filter(k => isMs(P, k.style) || isShape(P, k, "tile")).forEach(k => { const c = itemColours(k, ln.l); if (isMs(P, k.style)) drawMarker(grp, styleOf(P, k.style).shape, L.x(k.start) + L.ppd / 2, y + h / 2, G.ms * .7, c.fill, c.stroke); });
   if (selected) el("rect", { x: x1 - 2, y: top - 1, width: w + 4, height: bottom - top + 2, fill: "none", stroke: BRAND.orange, "stroke-width": 1.6, "pointer-events": "none" }, grp);
   if (!opts.print) {
@@ -1767,6 +1789,9 @@ const BAR_SHAPES = [["bar","Plain bar"],["rounded","Rounded bar"],["poss","Hatch
 function isContainer(p, it) { return /^container/.test(styleOf(p, it.style).shape); }
 /* a summary's title: where it sits (bracket: auto picks a side with room; box: left; umbrella: centre), size, weight, colour */
 const TITLE_SCALE = { S: .85, M: 1, L: 1.25 };
+const UMB_MODES = [["auto", "Auto"], ["inside", "Inside"], ["left", "Left"], ["right", "Right"], ["above", "Above"], ["key", "Key no."], ["none", "Hide"]];
+/* an umbrella's title size: the same on every umbrella of a size, never shrunk to squeeze in (Auto moves it out or keys it instead) */
+const umbTitleSize = (tf, h) => Math.min({ S: 8.5, M: 10.5, L: 13 }[tf.size] || 10.5, h * .95);
 function titleFmt(p, it) {
   const sh = styleOf(p, it.style).shape, def = sh === "container-umbrella" ? "centre" : sh === "container-box" ? "left" : "auto";
   return { align: it.titleAlign || def, def, scale: TITLE_SCALE[it.titleSize] || 1, size: it.titleSize || "M", weight: it.titleWeight === "regular" ? 500 : 700, bold: it.titleWeight !== "regular", colour: it.titleColour || "" };
@@ -2429,7 +2454,7 @@ function openSideTab(tab, focusId) {
 /* several items selected: what they are, and changes that apply to all of them at once */
 function renderMultiSide(side) {
   const its = [...MULTI].map(id => P.items.find(i => i.id === id)).filter(Boolean);
-  const bars = its.filter(i => !isMs(P, i.style) && !isCurtain(P, i.style) && !isContainer(P, i)), mss = its.filter(i => isMs(P, i.style));
+  const bars = its.filter(i => !isMs(P, i.style) && !isCurtain(P, i.style) && !isContainer(P, i)), mss = its.filter(i => isMs(P, i.style)), umbs = its.filter(i => isUmbrella(P, i));
   const other = its.length - bars.length - mss.length;
   const s0 = Math.min(...its.map(i => toDays(i.start))), s1 = Math.max(...its.map(i => toDays(i.end)));
   const count = (n, w) => n ? `${n} ${w}${n === 1 ? "" : "s"}` : "";
@@ -2444,7 +2469,7 @@ function renderMultiSide(side) {
       <div class="f"><label for="mxLane">Lane</label><select id="mxLane"><option value="">(as they are)</option>${P.lanes.map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join("")}</select></div>
       ${bars.length ? `<div class="f"><label for="mxStyle">Bar type</label><select id="mxStyle"><option value="">(as they are)</option>${P.styles.filter(s => s.behaviour === "Stretch" && !/^container/.test(s.shape)).map(s => `<option value="${esc(s.name)}">${esc(s.notes || s.name)}</option>`).join("")}</select></div>` : ""}
     </div>
-    ${bars.length ? `<div class="f"><label>Labels</label><div class="seg" role="group" aria-label="Label position">${LABEL_MODES.map(([v, n]) => `<button type="button" data-mxlabel="${v}">${n}</button>`).join("")}</div></div>` : ""}
+    ${bars.length || umbs.length ? `<div class="f"><label>Labels</label><div class="seg" role="group" aria-label="Label position">${LABEL_MODES.map(([v, n]) => `<button type="button" data-mxlabel="${v}">${n}</button>`).join("")}</div></div>` : ""}
     <div class="row2">
       <div class="f"><label for="mxFill">Fill</label><input id="mxFill" type="color" value="${itemColours(its[0], P.lanes.find(l => l.id === its[0].lane)).fill}"></div>
       <div class="f"><label>&nbsp;</label><button class="btn" id="mxReset" title="Back to the lane and type colours">Default colours</button></div>
@@ -2472,7 +2497,12 @@ function renderMultiSide(side) {
     }, true);
   };
   if ($("mxStyle")) $("mxStyle").onchange = e => { const s = e.target.value; if (s) each(x => { if (bars.some(b => b.id === x.id)) x.style = s; }); };
-  side.querySelectorAll("[data-mxlabel]").forEach(b => b.onclick = () => each(x => { if (!bars.some(y => y.id === x.id)) return; if (b.dataset.mxlabel === "auto") delete x.labelMode; else x.labelMode = b.dataset.mxlabel; }));
+  side.querySelectorAll("[data-mxlabel]").forEach(b => b.onclick = () => each(x => {
+    const v = b.dataset.mxlabel, umb = umbs.some(y => y.id === x.id);
+    if (!umb && !bars.some(y => y.id === x.id)) return;
+    if (umb && !UMB_MODES.some(([k]) => k === v)) return;   // below / upright don't apply to an umbrella's title
+    if (v === "auto") delete x.labelMode; else x.labelMode = v;
+  }));
   $("mxFill").onchange = e => each(x => { x.fill = e.target.value.toUpperCase(); });
   $("mxReset").onclick = () => each(x => { x.fill = ""; x.stroke = ""; });
   $("mxPct").onchange = e => { const v = Math.max(0, Math.min(100, Math.round(+e.target.value || 0))); each(x => { if (!tracked(x)) return; if (v) x.pct = v; else delete x.pct; if (v >= 100) x.status = "Complete"; else if (x.status === "Complete") x.status = "Active"; }); };
@@ -2961,10 +2991,12 @@ function itemExtras(cur) {
     const kids = containerChildren(P, cur), box = styleOf(P, cur.style).shape === "container-box";
     const tf = titleFmt(P, cur), tseg = (key, label, opts, val) => `<div class="f"><label>${label}</label><div class="seg" role="group" aria-label="${label}">${opts.map(([v, n]) => `<button type="button" data-tset="${key}" data-val="${v}" aria-pressed="${val === v}">${n}</button>`).join("")}</div></div>`;
     const titleCtl = `<div class="tagfmt">
-      ${tseg("titleAlign", "Title position", [...(tf.def === "auto" ? [["auto", "Auto"]] : []), ["left", "Left"], ["centre", "Centre"], ["right", "Right"]], tf.align)}
+      ${isUmbrella(P, cur) ? `${tseg("labelMode", "Title", UMB_MODES, cur.labelMode || "auto")}
+      ${(() => { const pl = LAY?.labels?.get(cur.id); return !cur.labelMode && pl ? `<p class="note">Auto puts it ${{ inside: "inside the bar", right: "to the right of the bar", left: "to the left of the bar", key: `as no. ${pl.n}, listed in the key at the bottom of the page` }[pl.mode] || "inside"}.</p>` : ""; })()}
+      ${tseg("titleAlign", "Inside, aligned", [["left", "Left"], ["centre", "Centre"], ["right", "Right"]], tf.align)}` : tseg("titleAlign", "Title position", [...(tf.def === "auto" ? [["auto", "Auto"]] : []), ["left", "Left"], ["centre", "Centre"], ["right", "Right"]], tf.align)}
       <div class="row2">${tseg("titleSize", "Title size", [["S", "S"], ["M", "M"], ["L", "L"]], tf.size)}${tseg("titleWeight", "Weight", [["bold", "Bold"], ["regular", "Regular"]], tf.bold ? "bold" : "regular")}</div>
       <div class="f"><label for="cTitleCol">Title colour</label><input id="cTitleCol" type="color" value="${tf.colour || (isUmbrella(P, cur) ? textOn(umbrellaColour(cur, P.lanes.find(l => l.id === cur.lane) || null)) : BRAND.navy)}"></div>
-      ${cur.titleAlign || cur.titleSize || cur.titleWeight || cur.titleColour ? `<p class="note"><a href="#" id="cTitleReset">Default title</a></p>` : ""}
+      ${cur.titleAlign || cur.titleSize || cur.titleWeight || cur.titleColour || (isUmbrella(P, cur) && cur.labelMode) ? `<p class="note"><a href="#" id="cTitleReset">Default title</a></p>` : ""}
     </div>`;
     const sets = cur.stageSets, stageCtl = sets ? `<div class="tagfmt">
       <div class="f"><label>Stages</label><div class="seg" role="group" aria-label="Stages from">${[["keywords", "By type of work"], ["wbs", "From its WBS"]].map(([v, n]) => `<button type="button" data-stagesby="${v}" aria-pressed="${(cur.stagesBy || "keywords") === v}" ${(sets[v] || []).length ? "" : "disabled title='Nothing to make stages from this way'"}>${n}</button>`).join("")}</div></div>
@@ -2999,7 +3031,7 @@ function bindItemExtras(cur) {
   });
   if ($("cCollapse")) $("cCollapse").onclick = () => upd(x => { x.collapsed = !x.collapsed; });
   // a summary's title: the default value is stored as nothing, so the type's look still applies
-  const tDef = { titleAlign: titleFmt(P, cur).def, titleSize: "M", titleWeight: "bold" };
+  const tDef = { titleAlign: titleFmt(P, cur).def, titleSize: "M", titleWeight: "bold", labelMode: "auto" };
   $("side").querySelectorAll("[data-tset]").forEach(b => b.onclick = () => upd(x => { const k = b.dataset.tset; if (b.dataset.val === tDef[k]) delete x[k]; else x[k] = b.dataset.val; }));
   // an umbrella from P6: rebuild its stage bars from the other version kept at import, and remember the choice for updates
   // (both faces of a split area come from one WBS part: they switch together, as the next update would build them)
@@ -3019,7 +3051,7 @@ function bindItemExtras(cur) {
     syncContainers(p);
   }, true));
   if ($("cTitleCol")) $("cTitleCol").onchange = e => upd(x => x.titleColour = e.target.value.toUpperCase());
-  if ($("cTitleReset")) $("cTitleReset").onclick = e => { e.preventDefault(); upd(x => ["titleAlign", "titleSize", "titleWeight", "titleColour"].forEach(k => delete x[k])); };
+  if ($("cTitleReset")) $("cTitleReset").onclick = e => { e.preventDefault(); upd(x => ["titleAlign", "titleSize", "titleWeight", "titleColour", ...(isUmbrella(P, x) ? ["labelMode"] : [])].forEach(k => delete x[k])); };
   const lastRow = x => { const k = containerChildren(P, x); return k.length ? Math.max(...k.map(i => i.row)) : x.row; };
   // the next row below that has an activity not already in a summary (blank rows are skipped)
   const nextRow = x => {

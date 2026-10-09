@@ -448,6 +448,24 @@ const TESTS = {
     T.eq([...before].filter(([id, s0]) => { const i = T.item(id); return i && sig(i) !== s0; }).map(([id]) => id), [], "names, colours, rows and lanes stay as they were");
     T.eq(P.lanes.map(l => l.id).join(), lanes, "and the lane order");
   },
+  "Umbrella titles: same size, out of a short bar, keyed when there's no room": () => {
+    const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-12-31" }; ensureSummaryStyles(p);
+    const l = newLane(p, "Works");
+    const U = (id, name, s, e, row) => { p.items.push({ id, name, style: "U_CONSTRUCT", lane: l.id, start: s, end: e, status: "Active", row, span: 2, fill: "", stroke: "" }); p.items.push({ id: id + "1", name: "Stage", style: "BAR", lane: l.id, start: s, end: e, status: "Active", row: row + 1, parent: id, fill: "", stroke: "" }); };
+    U("A", "Segment 1 - Long Enough Bar", "2027-01-01", "2027-06-30", 0);
+    U("B", "Segment 2 - A short umbrella with a long name", "2027-02-01", "2027-02-20", 2);
+    U("C", "Segment 3 - Squeezed in between", "2027-03-01", "2027-03-10", 4); U("D", "Segment 4 - Right after", "2027-03-12", "2027-12-20", 4); U("E", "Segment 0 - Just before it", "2027-01-01", "2027-02-27", 4);
+    loadDoc(p, null);
+    const mode = id => LAY.labels.get(id).mode;
+    T.eq([mode("A"), mode("B"), mode("C")], ["inside", "right", "key"], "inside if it fits, beside if there's room, else a key number");
+    T.eq(LAY.labels.get("A").fs, LAY.labels.get("D").fs, "one size for every umbrella title");
+    T.ok(LAY.labels.keyList.some(k => k.name === "Segment 3 - Squeezed in between"), "the keyed one is in the key");
+    sel = { type: "item", id: "A" }; render(); renderSide();
+    document.querySelector('#side [data-tset="labelMode"][data-val="key"]').click();
+    T.eq([T.item("A").labelMode, mode("A")], ["key", "key"], "Key no. from the side panel");
+    selectItems(["A", "B"]); document.querySelector('#side [data-mxlabel="none"]').click();
+    T.eq([T.item("A").labelMode, T.item("B").labelMode], ["none", "none"], "and for several at once");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));
