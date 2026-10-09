@@ -1512,12 +1512,13 @@ function planLabels(L) {
       const st = styleOf(P, i.style), x1 = L.x(i.start), x2 = L.x(i.end) + L.ppd, w = x2 - x1;
       const parent = parentOf.get(i.id), umb = parent && isUmbrella(P, parent);
       // possession tiles: a caption below when they sit on a work row, the name upright inside on the possession lane
-      if (st.shape === "tile") { out.set(i.id, { mode: i.labelMode && i.labelMode !== "auto" ? i.labelMode : parent ? "below" : "upright", auto: !i.labelMode }); captions.push(i); continue; }
+      const keyed = plan => { if (plan.mode === "key") { plan.n = keyList.length + 1; keyList.push({ n: plan.n, name: i.name }); } return plan; };   // Key no.: numbered, listed in the key
+      if (st.shape === "tile") { out.set(i.id, keyed({ mode: i.labelMode && i.labelMode !== "auto" ? i.labelMode : parent ? "below" : "upright", auto: !i.labelMode })); captions.push(i); continue; }
       // an umbrella's stages: the name inside in small type, or below when the stage is too short
       if (umb) {
         const roomBelow = (+parent.span || 2) > Math.max(...containerChildren(P, parent).map(k => k.row)) - parent.row + 1;
         const fits = textW(i.name, STAGE_FONT, 500) + 6 < w, m = i.labelMode && i.labelMode !== "auto" ? i.labelMode : fits ? "inside" : roomBelow ? "below" : "none";
-        out.set(i.id, { mode: m, auto: !i.labelMode, small: true }); if (m === "below") captions.push(i); continue;
+        out.set(i.id, keyed({ mode: m, auto: !i.labelMode, small: true })); if (m === "below") captions.push(i); continue;
       }
       const tw = textW(i.name, 9, 500);
       const limit = Math.min(parent ? L.x(parent.end) + L.ppd - 3 : L.W - 4,

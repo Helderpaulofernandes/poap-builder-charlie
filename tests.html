@@ -378,6 +378,16 @@ const TESTS = {
     document.getElementById("cTitleReset").click();
     T.eq([b.titleAlign, T.item("WBS C").titleSize], [undefined, undefined], "Default title clears it");
   },
+  "Key no. on a stage inside an umbrella inside a box goes in the key": () => {
+    const M = p6Model(parseXer(T.xer())), rec = p6SuggestSummary(M);
+    rec["C"] = "group"; rec["C.A"] = "umbrella"; rec["C.B"] = "umbrella";
+    loadDoc(p6MakeProject(M, rec, "T-100 OPTION A.xer").p, null);
+    const stage = containerChildren(P, T.item("WBS C.A"))[0];
+    commit(p => p.items.find(i => i.id === stage.id).labelMode = "key", true);
+    const plan = LAY.labels.get(stage.id);
+    T.eq([plan.mode, LAY.labels.keyList.map(k => k.name)], ["key", [stage.name]], "numbered and listed");
+    T.ok([...document.querySelectorAll("#chart text")].some(t => t.textContent === stage.name), "the key at the foot of the sheet names it");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));
