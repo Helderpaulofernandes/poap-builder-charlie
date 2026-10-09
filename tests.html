@@ -311,6 +311,32 @@ const TESTS = {
     undo();
     T.eq([canNest(P, box, a), canNest(P, a, box), canNest(P, box, T.item("WBS C"))], [true, false, false], "only umbrellas go in a box, one level deep");
   },
+  "Moving a summary to another lane takes everything inside": () => {
+    const M = p6Model(parseXer(T.xer())), rec = p6SuggestSummary(M);
+    rec["C"] = "group"; rec["C.A"] = "umbrella"; rec["C.B"] = "umbrella";
+    const { p } = p6MakeProject(M, rec, "T-100 OPTION A.xer"); loadDoc(p, null);
+    const design = P.lanes.find(l => l.name === "Design").id, others = P.items.filter(i => i.lane === design);
+    const lowest = Math.max(...others.map(i => bottomOf(P, i)));
+    // the box, from the side panel
+    sel = { type: "item", id: "WBS C" }; render(); renderSide();
+    const pick = document.getElementById("iLane"); pick.value = design; pick.dispatchEvent(new Event("change"));
+    const box = T.item("WBS C"), fam = descendants(P, box);
+    T.ok(fam.length >= 4 && fam.every(k => k.lane === design), "umbrellas and their stages went with the box");
+    T.eq([T.item("WBS C.A").parent, T.item("WBS C.B").parent], ["WBS C", "WBS C"], "still inside it");
+    T.ok(box.row > lowest, "placed below what was already in that lane");
+    undo(); T.ok(descendants(P, T.item("WBS C")).every(k => k.lane === T.item("WBS C").lane && k.lane !== design), "undo puts it all back");
+    // an umbrella on its own: its stages go with it, and it leaves its box
+    const lane2 = P.lanes.find(l => l.name === "Key Dates").id;
+    sel = { type: "item", id: "WBS C.A" }; render(); renderSide();
+    const pick2 = document.getElementById("iLane"); pick2.value = lane2; pick2.dispatchEvent(new Event("change"));
+    const u = T.item("WBS C.A");
+    T.ok(containerChildren(P, u).length && containerChildren(P, u).every(k => k.lane === lane2 && k.row > u.row), "its stages came along, still under it");
+    T.eq(u.parent, undefined, "and it left the box behind");
+    undo();
+    // several selected, box among them
+    selectItems(["WBS C", "WBS D.1"]); const mx = document.getElementById("mxLane"); mx.value = lane2; mx.dispatchEvent(new Event("change"));
+    T.ok([T.item("WBS C"), ...descendants(P, T.item("WBS C")), T.item("WBS D.1")].every(k => k.lane === lane2), "Move to lane takes the box's contents too");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));

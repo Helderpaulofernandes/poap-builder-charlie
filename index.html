@@ -1815,6 +1815,16 @@ function summaryAt(p, it) {
   return p.items.filter(c => isContainer(p, c) && !c.collapsed && c.lane === it.lane && it.row > c.row && it.row <= c.row + spanOf(c)
     && toDays(it.end) >= toDays(c.start) && toDays(it.start) <= toDays(c.end)).sort((a, b) => spanOf(a) - spanOf(b))[0] || null;
 }
+/* a summary bar, box or umbrella to another lane, with everything inside it, below what's already there
+   (an umbrella leaving its lane leaves its box) */
+function moveToLane(p, c, laneId) {
+  const fam = [c, ...descendants(p, c)], moving = new Set(fam);
+  const bottom = p.items.filter(i => i.lane === laneId && !moving.has(i) && !isCurtain(p, i.style)).reduce((m, i) => Math.max(m, bottomOf(p, i)), -1);
+  const d = bottom + 1 - c.row;
+  fam.forEach(k => { k.lane = laneId; k.row += d; });
+  if (c.parent && !moving.has(p.items.find(i => i.id === c.parent))) delete c.parent;
+  syncContainers(p, { noPush: true });
+}
 /* the summary bar or box an umbrella dropped in its rows belongs to */
 function boxAt(p, u) {
   return p.items.find(c => c !== u && canNest(p, c, u) && !c.collapsed && c.lane === u.lane && u.row > c.row && u.row < c.row + spanOf(c)
@@ -2430,7 +2440,15 @@ function renderMultiSide(side) {
   const days = () => Math.max(1, Math.round(+$("mxDays").value || 0));
   $("mxEarlier").onclick = () => shiftItems(ids, -days());
   $("mxLater").onclick = () => shiftItems(ids, days());
-  $("mxLane").onchange = e => { const l = e.target.value; if (!l) return; each(x => { if (isCurtain(P, x.style) || x.lane === l) return; x.lane = l; delete x.parent; x.row = 999; x.row = freeRow(P, x); }); };
+  $("mxLane").onchange = e => {
+    const l = e.target.value; if (!l) return;
+    commit(p => {
+      const sel = ids.map(id => p.items.find(i => i.id === id)).filter(Boolean), moved = new Set();
+      // summaries first: each takes what's inside along; then loose items (ones inside a summary that moved have gone with it)
+      sel.filter(x => isContainer(p, x) && !(x.parent && ids.includes(x.parent))).forEach(x => { if (x.lane !== l) moveToLane(p, x, l); [x, ...descendants(p, x)].forEach(k => moved.add(k)); });
+      sel.forEach(x => { if (moved.has(x) || isCurtain(p, x.style) || x.lane === l) return; x.lane = l; delete x.parent; x.row = 999; x.row = freeRow(p, x); });
+    }, true);
+  };
   if ($("mxStyle")) $("mxStyle").onchange = e => { const s = e.target.value; if (s) each(x => { if (bars.some(b => b.id === x.id)) x.style = s; }); };
   side.querySelectorAll("[data-mxlabel]").forEach(b => b.onclick = () => each(x => { if (!bars.some(y => y.id === x.id)) return; if (b.dataset.mxlabel === "auto") delete x.labelMode; else x.labelMode = b.dataset.mxlabel; }));
   $("mxFill").onchange = e => each(x => { x.fill = e.target.value.toUpperCase(); });
@@ -2498,7 +2516,7 @@ function renderSideInner() {
     $("iStart").onchange = e => { if (!e.target.value) return; upd(x => { const d = toDays(e.target.value) - toDays(x.start); x.start = e.target.value; x.end = isMs(P, x.style) ? x.start : (toDays(x.end) < toDays(x.start) ? addDays(x.end, d) : x.end); }); };
     if ($("iEnd")) $("iEnd").onchange = e => { if (!e.target.value) return; upd(x => x.end = toDays(e.target.value) < toDays(x.start) ? x.start : e.target.value); };
     $("iStyle").onchange = e => upd(x => { x.style = e.target.value; if (isMs(P, x.style)) x.end = x.start; else if (x.end === x.start) x.end = addDays(x.start, 13); });
-    $("iLane").onchange = e => upd(x => { x.lane = e.target.value; x.row = freeRow(P, x); });
+    $("iLane").onchange = e => commit(p => { const x = p.items.find(i => i.id === cur.id); if (isContainer(p, x)) moveToLane(p, x, e.target.value); else { x.lane = e.target.value; x.row = freeRow(p, x); } }, true);
     $("iFill").onchange = e => upd(x => x.fill = e.target.value.toUpperCase());
     $("iStroke").onchange = e => upd(x => x.stroke = e.target.value.toUpperCase());
     $("iStatus").onchange = e => upd(x => { x.status = e.target.value; if (x.status === "Complete") x.pct = 100; else if (pctOf(x) >= 100) delete x.pct; });
