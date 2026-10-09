@@ -98,7 +98,17 @@ button, input, select { font: inherit; color: inherit; }
 .p6row.off .p6name, .p6row.off .p6meta { opacity: .5; }
 .p6row select { padding: 3px 4px; font-size: 12px; border: 1px solid var(--line); border-radius: 3px; background: var(--bg); }
 .p6tog { border: 0; background: none; cursor: pointer; color: var(--muted); padding: 0; font-size: 12px; }
-.p6name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.p6name { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.p6title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }   /* a long name shortens; its stage choices stay in view */
+.p6name .p6opts { flex: none; }
+.p6tools { display: flex; gap: 8px; align-items: center; flex: none; }
+/* full screen: the whole window for the preview and the WBS */
+.modal:has(.p6dlg.full) { padding: 0; }
+.dlg.p6dlg.full { width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; }
+.p6dlg.full .p6prev { max-height: 32vh; }
+.p6dlg.full .p6prev.big { max-height: 80vh; }
+.p6dlg.full .p6tree, .p6dlg.full .p6sum { max-height: calc(68vh - 200px); min-height: 220px; }
+.p6dlg.full .p6b { grid-template-columns: minmax(0, 1fr) 340px; }
 .p6code { font: 11px var(--font-mono); color: var(--muted); }
 .p6meta { font-size: 11px; color: var(--muted); line-height: 1.25; }
 .p6meta .warn, .p6warn b { color: var(--warn); }
@@ -4388,7 +4398,8 @@ function openP6Builder(M, rec, fname, mode, from = null) {
   const summary = () => rec["~style"] === "summary";
   const m = showModal(`<header class="p6head"><div><h3>${update ? "Update from" : "Summary from"} P6: ${esc(fname)}</h3>
       <p>${esc(M.title)}${M.code ? ` (${esc(M.code)})` : ""} · data date ${M.dataDate ? fmt(M.dataDate) : "not set"} · ${M.tasks.length} activities. <span id="p6From">${update ? "These are the choices used last time; new WBS parts have a suggestion." : from ? p6FromNote(from) : "This is a suggestion to start from: change anything and the preview follows."}</span></p></div>
-      <div class="seg p6style" role="group" aria-label="Style"><button type="button" data-style="summary">Summary</button><button type="button" data-style="detailed">Detailed (WBS bars)</button></div></header>
+      <div class="p6tools"><button type="button" class="btn" id="p6Full" title="Use the whole window (remembered)">⤢ Full screen</button>
+      <div class="seg p6style" role="group" aria-label="Style"><button type="button" data-style="summary">Summary</button><button type="button" data-style="detailed">Detailed (WBS bars)</button></div></div></header>
     <div class="body p6body">
       <div class="p6prev" id="p6Prev" title="Click to make the preview larger or smaller"><p class="note">Drawing the preview…</p></div>
       <div class="p6b"><div class="p6tree" id="p6Tree"></div><div class="p6sum" id="p6Sum"></div></div>
@@ -4450,6 +4461,12 @@ function openP6Builder(M, rec, fname, mode, from = null) {
     }, 120);
   };
   prev.onclick = () => prev.classList.toggle("big");
+  // full screen, remembered for next time
+  const dlg = m.querySelector(".dlg"), fullBtn = m.querySelector("#p6Full");
+  const setFull = on => { dlg.classList.toggle("full", on); fullBtn.textContent = on ? "⤡ Smaller" : "⤢ Full screen"; fullBtn.setAttribute("aria-pressed", on); };
+  let full = false; try { full = localStorage.getItem("poap.p6full") === "1"; } catch (e) {}
+  setFull(full);
+  fullBtn.onclick = () => { full = !full; setFull(full); try { localStorage.setItem("poap.p6full", full ? "1" : "0"); } catch (e) {} };
   const paint = () => {
     m.querySelectorAll("[data-style]").forEach(b => b.setAttribute("aria-pressed", (rec["~style"] || "detailed") === b.dataset.style));
     const modes = summary() ? P6_MODES_SUMMARY : P6_MODES;
@@ -4465,7 +4482,7 @@ function openP6Builder(M, rec, fname, mode, from = null) {
       })() : "";
       rows.push(`<div class="p6row ${md === "hide" || ctx.taken ? "off" : ""}" style="--d:${w.depth - 1}">
         <button type="button" class="p6tog" data-tog="${esc(w.path)}" ${kidsHere ? "" : "disabled"} aria-label="${open.has(w.path) ? "Collapse" : "Expand"}">${kidsHere ? (open.has(w.path) ? "▾" : "▸") : ""}</button>
-        <span class="p6name" title="${esc(w.path)} · ${esc(w.name)}"><span class="p6code">${esc(w.code)}</span> ${esc(w.name)}${extra}</span>
+        <span class="p6name" title="${esc(w.path)} · ${esc(w.name)}"><span class="p6title"><span class="p6code">${esc(w.code)}</span> ${esc(w.name)}</span>${extra}</span>
         <span class="p6meta">${r.s ? `${fmt(r.s)} – ${fmt(r.e)}` : ""}<br>${r.work.length} act${r.ms.length ? ` · ${r.ms.length} ms` : ""}${r.left ? ` · <span class="warn" title="Unlinked activities at the data date, left out of the dates">${r.left} left out</span>` : ""}</span>
         ${ctx.taken ? `<span class="note p6taken">${ctx.taken}</span>` : `<select data-mode="${esc(w.path)}" aria-label="What ${esc(w.name)} shows">${here.map(([v, n]) => `<option value="${v}" ${v === md ? "selected" : ""}>${n}</option>`).join("")}${here.some(([v]) => v === md) ? "" : `<option value="${esc(md)}" selected>${esc((modes.find(([v]) => v === md) || [md, md])[1])}</option>`}</select>`}</div>`);
       if (!open.has(w.path)) return;
