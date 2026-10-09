@@ -466,6 +466,33 @@ const TESTS = {
     selectItems(["A", "B"]); document.querySelector('#side [data-mxlabel="none"]').click();
     T.eq([T.item("A").labelMode, T.item("B").labelMode], ["none", "none"], "and for several at once");
   },
+  "Reopening the XER choices reads the programme: removed parts stay off, the preview shows the changes": async () => {
+    await importP6(new File([T.xer()], "T-100 OPTION A.xer"), "new");
+    let m = document.querySelector(".modal"); const set = (path, v) => { const x = m.querySelector(`[data-mode="${path}"]`); x.value = v; x.dispatchEvent(new Event("change", { bubbles: true })); };
+    set("C", "lane"); set("C.A", "umbrella"); set("C.B", "umbrella");
+    m.querySelector("[data-act=go]").click(); await new Promise(r => setTimeout(r, 150)); T.clean();
+    T.ok(P.p6.ids.includes("WBS C.B"), "a build remembers what it brought in");
+    // on the sheet: Portion B taken off, and one of Portion A's stages
+    const b = T.item("WBS C.B"), aStage = containerChildren(P, T.item("WBS C.A"))[0];
+    deleteItems([b.id, ...descendants(P, b).map(k => k.id), aStage.id]);
+    await document.getElementById("bP6Edit").onclick(); m = document.querySelector(".modal");
+    const tog = k => { const t = m.querySelector(`[data-tog="${k}"]`); if (t && t.textContent.includes("▸")) t.click(); }; tog("C");
+    T.eq(m.querySelector('[data-mode="C.B"]').value, "hide", "what was taken off the sheet opens as Leave out");
+    T.ok(/removed on the sheet/.test(m.querySelector('[data-mode="C.B"]').closest(".p6row").innerText), "and says so");
+    T.ok(/removed on the sheet/.test(m.querySelector("#p6Chg").innerText), "the changes line counts it");
+    await new Promise(r => setTimeout(r, 300));
+    T.ok(m.querySelector("#p6Prev .p6legend"), "the preview is the programme with the changes marked");
+    m.querySelector("[data-act=go]").click();
+    let pv = document.querySelector(".modal");
+    T.ok(/0 changed/.test(pv.querySelector(".chips").innerText) && /0 new/.test(pv.querySelector(".chips").innerText), "nothing comes back on its own");
+    T.clean();
+    // bring Portion A's stage back
+    await document.getElementById("bP6Edit").onclick(); m = document.querySelector(".modal"); tog("C");
+    m.querySelector('[data-revive="C.A"]').click();
+    T.ok(/1 new/.test(m.querySelector("#p6Chg").innerText), "bring back makes it new again");
+    m.querySelector("[data-act=go]").click(); pv = document.querySelector(".modal");
+    T.ok(/1 new/.test(pv.querySelector(".chips").innerText), "and the review adds it");
+  },
   "A gate or curtain can cover only some lanes": () => {
     const p = blankProject(); p.timeline = { start: "2027-01-01", end: "2027-06-30" }; ensureSummaryStyles(p);
     const ls = ["North", "Middle", "South"].map(n => newLane(p, n));

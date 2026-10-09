@@ -88,6 +88,19 @@ button, input, select { font: inherit; color: inherit; }
 .p6opt { align-items: flex-start; }
 .p6taken { font-size: 11px; font-style: italic; text-align: right; }
 .p6msrow { font-size: 12px; }
+.p6tag { flex: none; font-size: 10.5px; line-height: 1.5; padding: 0 6px; border-radius: 8px; border: 1px solid transparent; white-space: nowrap; font-weight: 600; }
+button.p6tag { cursor: pointer; font-size: 11.5px; padding: 1px 8px; }
+.p6tag.new { background: rgba(26,158,74,.16); color: #2DBE63; border-color: rgba(26,158,74,.45); }
+.p6tag.mov { background: rgba(232,130,12,.15); color: #F09A3E; border-color: rgba(232,130,12,.45); }
+.p6tag.rem { background: rgba(232,32,42,.12); color: #F26B71; border-color: rgba(232,32,42,.4); }
+.p6tag.lv { background: rgba(127,127,127,.15); color: var(--muted); border-color: rgba(127,127,127,.4); }
+.p6tag.on:not(button) { color: var(--muted); }
+button.p6tag.on { outline: 2px solid currentColor; }
+.p6tag a { color: inherit; }
+.p6chg { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12px; }
+.p6legend { margin: 0; padding: 4px 8px; font-size: 11px; color: #333; display: flex; gap: 6px; align-items: center; }
+.p6legend .k { display: inline-block; width: 14px; height: 9px; border: 2px solid; border-radius: 2px; }
+.p6legend .k.new { border-color: #1A9E4A; } .p6legend .k.mov { border-color: #E8820C; border-style: dashed; } .p6legend .k.lv { border-color: #bbb; background: #eee; }
 .p6dia { color: var(--accent-2); font-size: 10px; }
 .p6opt .note { font-size: 11px; line-height: 1.3; }
 .p6dates { display: grid; gap: 4px; border: 1px solid var(--line); border-radius: 4px; padding: 6px; }
@@ -3915,17 +3928,7 @@ function previewImport(parsed, fname) {
         for (const c of changes) {
           const it = p.items.find(i => i.id === c.cur.id), r = c.r, st = styleOf(p, r.style).name;
           const oldLane = it.lane;
-          if (parsed.keepLook) {   // P6's dates and status; everything about how it looks and where it sits stays
-            Object.assign(it, { start: r.start, end: isMs(p, it.style) ? r.start : r.end, status: r.status || it.status });
-            if (tracked(it)) {
-              if (r.pct !== undefined) { if (r.pct) it.pct = r.pct; else delete it.pct; }
-              if (r.bStart !== undefined) { if (r.bStart) { it.bStart = r.bStart; it.bEnd = isMs(p, it.style) ? r.bStart : (r.bEnd || r.bStart); } else { delete it.bStart; delete it.bEnd; } }
-              if (r.preds !== undefined) { if (r.preds.length) it.preds = r.preds; else delete it.preds; }
-            }
-            if (r.p6) { if (r.p6.crit) it.p6crit = true; else delete it.p6crit; if (r.p6.tf != null) it.p6tf = r.p6.tf; else delete it.p6tf; }
-            if (r.x) Object.assign(it, r.x);   // P6 data: stage versions, notes (the stage choice is the one saved from the sheet)
-            continue;
-          }
+          if (parsed.keepLook) { p6RefreshItem(p, it, r); continue; }   // P6's dates and status; how it looks and where it sits stay
           Object.assign(it, { name: r.name || it.name, start: r.start, end: isMs(p, st) ? r.start : r.end, style: st, status: r.status || it.status });
           if (r.fill) it.fill = r.fill; if (r.stroke) it.stroke = r.stroke;
           if (r.lane) { it.lane = laneFor(r.lane); if (it.lane !== oldLane) it.row = freeRow(p, it); }
@@ -3943,25 +3946,7 @@ function previewImport(parsed, fname) {
         }
         if (ddChange) p.progress = { ...prog(), ...(p.progress || {}), dataDate: ddNew };
         const reserved = new Set(parsed.rows.map(r => r.id).filter(Boolean));
-        for (const r of [...adds, ...dupes]) {
-          const st = styleOf(p, r.style).name;
-          const id = r.id && !p.items.some(i => i.id === r.id) ? r.id : nextId(p, st, r.id || null, reserved);
-          const curtain = isCurtain(p, st);
-          const it = { id, name: r.name, style: st, lane: curtain ? "" : laneFor(r.lane || "Unassigned"), start: r.start, end: isMs(p, st) ? r.start : r.end, status: r.status, row: 0, fill: r.fill, stroke: r.stroke };
-          if (r.parent) it.parent = r.parent;
-          if (r.collapsed) it.collapsed = true;
-          if (!curtain && r.pct) it.pct = r.pct;
-          if (!curtain && r.bStart) { it.bStart = r.bStart; it.bEnd = isMs(p, st) ? r.bStart : (r.bEnd || r.bStart); }
-          if (!curtain && r.predsRaw) { const pr = parsePreds(r.predsRaw, allIds).filter(x => x.id !== id); if (pr.length) it.preds = pr; }
-          if (r.p6) { if (r.p6.crit) it.p6crit = true; if (r.p6.tf != null) it.p6tf = r.p6.tf; }
-          if (r.x) Object.assign(it, r.x);
-          if (r.labelMode && r.labelMode !== "auto") it.labelMode = r.labelMode;
-          const par = it.parent && p.items.find(i => i.id === it.parent);
-          if (!curtain && par && Number.isFinite(r.relRow)) it.row = par.row + r.relRow;   // where it sits in its summary, wherever that summary is now
-          else if (!curtain && parsed.keepLook && /^container/.test(styleOf(p, st).shape)) it.row = p.items.filter(i => i.lane === it.lane && !isCurtain(p, i.style)).reduce((m, i) => Math.max(m, bottomOf(p, i)), -1) + 1;
-          else it.row = curtain ? 0 : Number.isFinite(r.row) ? r.row : freeRow(p, it);
-          p.items.push(it);
-        }
+        for (const r of [...adds, ...dupes]) rowToNewItem(p, r, { laneFor, allIds, reserved, keepLook: parsed.keepLook });
         // lanes from the Lanes sheet: create missing ones, apply colours, then put them in the sheet's order
         if (sheetLanes.length && parsed.keepLook) sheetLanes.forEach(sl => laneFor(sl.name));   // only lanes it needs that aren't there yet
         else if (sheetLanes.length) {
@@ -4348,7 +4333,8 @@ function p6BuildSummary(M, rec) {
   }
   // 3. the work: lanes, umbrellas (with their stages and possession tiles), plain bars and zones, in WBS order
   const tilesDone = new Set(), drawnBy = new Map(), laneByPath = new Map();   // WBS path -> rows that draw it / its lane
-  const umbrella = (w, lane, box = null) => {   // box: { id, minRow } when it sits inside a summary box
+  const umbrella = (w, lane, box = null) => { const n0 = rows.length; umbrella0(w, lane, box); for (let i = n0; i < rows.length; i++) rows[i].src ??= w.path; };
+  const umbrella0 = (w, lane, box = null) => {   // box: { id, minRow } when it sits inside a summary box
     const design = p6IsDesign(w), acts = p6Roll(M, w).work;
     if (!acts.length) return;
     const faces = (rec["~split"] || {})[w.path] === false ? [] : p6Faces(acts);
@@ -4375,7 +4361,8 @@ function p6BuildSummary(M, rec) {
       });
     }
   };
-  const visit = (w, lane) => {
+  const visit = (w, lane) => { const n0 = rows.length; visit0(w, lane); for (let i = n0; i < rows.length; i++) rows[i].src ??= w.path; };   // rows know their WBS part
+  const visit0 = (w, lane) => {
     const m = mode(w), r = p6Roll(M, w);
     if (m === "hide" || m === "possess" || m === "ms" || !r.inc.length) return;
     if (m === "lane") lane = addLane(w.path, w.name);
@@ -4412,7 +4399,7 @@ function p6BuildSummary(M, rec) {
       inside.minRow = Math.max(inside.minRow, a.length);
       parts.filter(x => !x.umb).sort((x, y) => x.rk.s < y.rk.s ? -1 : 1).forEach(({ k, rk }) => {
         const name = p6Short(k.name), s0 = toDays(rk.s), e0 = toDays(rk.e) + (textW(name, 9, 500) + 16) / dayPx();
-        const prow = { id: "WBS " + k.path, name, style: "BAR", lane: lane.name, start: rk.s, end: rk.e, status: "Active", row: place(lane, 1, s0, e0, inside.minRow), y: NaN, fill: tint(col, .5), stroke: "", parent: id, p6: { crit: crit(rk.inc) }, acts: rk.inc };
+        const prow = { id: "WBS " + k.path, name, style: "BAR", lane: lane.name, start: rk.s, end: rk.e, status: "Active", row: place(lane, 1, s0, e0, inside.minRow), y: NaN, fill: tint(col, .5), stroke: "", parent: id, p6: { crit: crit(rk.inc) }, acts: rk.inc, src: k.path };
         rows.push(prow); drawnBy.set(k.path, [prow]);
       });
       if (a.length <= boxTop + 1) take(lane, 1);   // an empty box keeps a row
@@ -4429,7 +4416,7 @@ function p6BuildSummary(M, rec) {
     for (; w && !hit; w = w.parent) { hit = drawnBy.get(w.path) || null; ln = ln || laneByPath.get(w.path) || null; }
     if (!hit && !ln) continue;   // its part of the WBS isn't on the sheet
     const words = (hit ? hit.map(x => x.name) : []).concat([...(function* () { for (let x = t.wbs; x; x = x.parent) yield x.name; })()]);
-    const name = p6MsName(t.name, words), base = { id: t.code, name, style: "ML_Square", start: t.start, end: t.start, status: t.done ? "Complete" : "Active", y: NaN, fill: "", stroke: "", p6: { crit: crit([t]), tf: t.tf } };
+    const name = p6MsName(t.name, words), base = { id: t.code, name, style: "ML_Square", start: t.start, end: t.start, status: t.done ? "Complete" : "Active", y: NaN, fill: "", stroke: "", p6: { crit: crit([t]), tf: t.tf }, src: t.wbs ? t.wbs.path : undefined };
     if (hit) {
       const fm = t.name.match(FACE_RE), h = hit.find(x => fm && x.face && x.face.toLowerCase() === fm[1].toLowerCase()) || hit[0];
       const umb = h.style && /^U_/.test(h.style), box = h.style === "SUMMARY_BOX";
@@ -4493,6 +4480,61 @@ function p6MakeProject(M, rec, fname) {
   if (summary) syncContainers(p, { noPush: true });
   return { p, rows, lanes };
 }
+/* What an update from this XER brings to the programme that's open: the rows, with summaries at the dates the sheet
+   fits them to (so unchanged ones aren't changes), existing rows keeping their place, new ones placed under their summary. */
+function p6UpdateRows(M, rec, fname) {
+  const built = rec["~style"] === "summary" ? p6BuildSummary(M, rec) : p6Build(M, rec), rows = built.rows;
+  const fp = p6MakeProject(M, rec, fname).p, byId = new Map((fp ? fp.items : []).map(i => [i.id, i]));
+  rows.forEach(r => { const f = byId.get(r.id); if (f && isContainer(fp, f) && f.fitChildren !== false) { r.start = f.start; r.end = f.end; } });
+  const builtRow = new Map(rows.map(r => [r.id, r.row])), have = new Set(P.items.map(i => i.id));
+  rows.forEach(r => {
+    if (have.has(r.id)) { r.row = NaN; return; }
+    if (r.parent && builtRow.has(r.parent)) { r.relRow = r.row - builtRow.get(r.parent); r.row = NaN; }   // placed under its summary at apply time
+    else if (r.lane && !(fp && isCurtain(fp, r.style))) r.row = NaN;   // anything else new: a free row, not where a fresh build would put it
+  });
+  return built;
+}
+/* the programme as it is, with an update's rows on it (keeping its look): for the importer's preview */
+function p6MergedProject(rows) {
+  const p = clone(P); ensureSummaryStyles(p);
+  const laneFor = name => { let l = p.lanes.find(x => x.name.toLowerCase() === String(name).toLowerCase()); if (!l) l = newLane(p, name); return l.id; };
+  const reserved = new Set(rows.map(r => r.id)), allIds = new Set([...p.items.map(i => i.id), ...reserved]);
+  for (const r of rows) { const it = p.items.find(i => i.id === r.id); if (it) p6RefreshItem(p, it, r); else rowToNewItem(p, r, { laneFor, allIds, reserved, keepLook: true }); }
+  syncContainers(p, { noPush: false });
+  return p;
+}
+/* an existing item takes P6's data from a row: dates, status, progress, baseline, links; its look and place stay */
+function p6RefreshItem(p, it, r) {
+  Object.assign(it, { start: r.start, end: isMs(p, it.style) ? r.start : r.end, status: r.status || it.status });
+  if (tracked(it)) {
+    if (r.pct !== undefined) { if (r.pct) it.pct = r.pct; else delete it.pct; }
+    if (r.bStart !== undefined) { if (r.bStart) { it.bStart = r.bStart; it.bEnd = isMs(p, it.style) ? r.bStart : (r.bEnd || r.bStart); } else { delete it.bStart; delete it.bEnd; } }
+    if (r.preds !== undefined) { if (r.preds.length) it.preds = r.preds; else delete it.preds; }
+  }
+  if (r.p6) { if (r.p6.crit) it.p6crit = true; else delete it.p6crit; if (r.p6.tf != null) it.p6tf = r.p6.tf; else delete it.p6tf; }
+  if (r.x) Object.assign(it, r.x);   // P6 data: stage versions, notes (the stage choice is the one saved from the sheet)
+}
+/* a new item from an imported row, placed: under its summary wherever that is now, a new summary at the foot of its lane, else a free row */
+function rowToNewItem(p, r, { laneFor, allIds, reserved, keepLook }) {
+  const st = styleOf(p, r.style).name;
+  const id = r.id && !p.items.some(i => i.id === r.id) ? r.id : nextId(p, st, r.id || null, reserved);
+  const curtain = isCurtain(p, st);
+  const it = { id, name: r.name, style: st, lane: curtain ? "" : laneFor(r.lane || "Unassigned"), start: r.start, end: isMs(p, st) ? r.start : r.end, status: r.status, row: 0, fill: r.fill, stroke: r.stroke };
+  if (r.parent) it.parent = r.parent;
+  if (r.collapsed) it.collapsed = true;
+  if (!curtain && r.pct) it.pct = r.pct;
+  if (!curtain && r.bStart) { it.bStart = r.bStart; it.bEnd = isMs(p, st) ? r.bStart : (r.bEnd || r.bStart); }
+  if (!curtain && r.predsRaw) { const pr = parsePreds(r.predsRaw, allIds).filter(x => x.id !== id); if (pr.length) it.preds = pr; }
+  if (r.p6) { if (r.p6.crit) it.p6crit = true; if (r.p6.tf != null) it.p6tf = r.p6.tf; }
+  if (r.x) Object.assign(it, r.x);
+  if (r.labelMode && r.labelMode !== "auto") it.labelMode = r.labelMode;
+  const par = it.parent && p.items.find(i => i.id === it.parent);
+  if (!curtain && par && Number.isFinite(r.relRow)) it.row = par.row + r.relRow;
+  else if (!curtain && keepLook && /^container/.test(styleOf(p, st).shape)) it.row = p.items.filter(i => i.lane === it.lane && !isCurtain(p, i.style)).reduce((m, i) => Math.max(m, bottomOf(p, i)), -1) + 1;
+  else it.row = curtain ? 0 : Number.isFinite(r.row) ? r.row : freeRow(p, it);
+  p.items.push(it);
+  return it;
+}
 /* the sheet the choices make, drawn small (the real drawing code, on a stand-in programme) */
 function p6PreviewSvg(project, width) {
   const real = P, realSel = sel, realMulti = MULTI;
@@ -4555,11 +4597,12 @@ function openP6Builder(M, rec, fname, mode, from = null) {
   const otherScenario = update && p6Scenario(fname) && p6Scenario(fname).toLowerCase() !== String(P.meta.title || "").toLowerCase();
   const summary = () => rec["~style"] === "summary";
   const m = showModal(`<header class="p6head"><div><h3>${update ? "Update from" : "Summary from"} P6: ${esc(fname)}</h3>
-      <p>${esc(M.title)}${M.code ? ` (${esc(M.code)})` : ""} · data date ${M.dataDate ? fmt(M.dataDate) : "not set"} · ${M.tasks.length} activities. <span id="p6From">${update ? "These are the choices used last time; new WBS parts have a suggestion." : from ? p6FromNote(from) : "This is a suggestion to start from: change anything and the preview follows."}</span></p></div>
+      <p>${esc(M.title)}${M.code ? ` (${esc(M.code)})` : ""} · data date ${M.dataDate ? fmt(M.dataDate) : "not set"} · ${M.tasks.length} activities. <span id="p6From">${update ? "Read from your programme as it is now: the tree shows what's on the sheet, and the preview shows the sheet with this XER's changes on it." : from ? p6FromNote(from) : "This is a suggestion to start from: change anything and the preview follows."}</span></p></div>
       <div class="p6tools"><button type="button" class="btn" id="p6Full" title="Use the whole window (remembered)">⤢ Full screen</button>
       <div class="seg p6style" role="group" aria-label="Style"><button type="button" data-style="summary">Summary</button><button type="button" data-style="detailed">Detailed (WBS bars)</button></div></div></header>
     <div class="body p6body">
       <div class="p6prev" id="p6Prev" title="Click to make the preview larger or smaller"><p class="note">Drawing the preview…</p></div>
+      ${update ? `<div class="p6chg" id="p6Chg"></div>` : ""}
       <div class="p6b"><div class="p6tree" id="p6Tree"></div><div class="p6sum" id="p6Sum"></div></div>
     </div>
     <footer>
@@ -4577,30 +4620,21 @@ function openP6Builder(M, rec, fname, mode, from = null) {
       if (!update) {
         const { p, rows, lanes } = p6MakeProject(M, rec, fname);
         if (!p) { toast("Nothing is selected to show. Set some WBS parts to a lane, umbrella, bar or key dates."); return false; }
-        p.p6 = p6;
+        p.p6 = { ...p6, ids: p.items.map(i => i.id) };   // what came from P6: the next update can tell what was removed on the sheet
         if (dataDate) p.progress = { dataDate };
         startNew(p);
         toast(`Built ${rows.length} items in ${lanes.length} lanes from ${M.tasks.length} activities. Choose where to save it.`, 6000);
       } else {
-        const built = summary() ? p6BuildSummary(M, rec) : p6Build(M, rec), rows = built.rows, lanes = built.lanes;
-        if (!rows.length) { toast("Nothing is selected to show."); return false; }
+        const a = analyse(), rows = a.rows, lanes = a.lanes;   // what was removed on the sheet stays off
+        if (!a.all.length) { toast("Nothing is selected to show."); return false; }
         if (summary()) ensureSummaryStyles(P);
-        // summaries' dates as the sheet fits them around what's inside (tiles too), so unchanged ones don't show as changes
-        const fitted = (p6MakeProject(M, rec, fname).p || { items: [] }).items, byId = new Map(fitted.map(i => [i.id, i]));
-        rows.forEach(r => { const f = byId.get(r.id); if (f && /^container/.test(styleOf(P, r.style).shape || "") && f.fitChildren !== false) { r.start = f.start; r.end = f.end; } });
-        // existing items keep the row they have on the sheet; new ones go where the summary puts them
-        const builtRow = new Map(rows.map(r => [r.id, r.row]));
-        rows.forEach(r => {
-          if (P.items.some(i => i.id === r.id)) { r.row = NaN; return; }
-          if (r.parent && builtRow.has(r.parent)) { r.relRow = r.row - builtRow.get(r.parent); r.row = NaN; }   // placed under its summary at apply time
-          else if (r.lane && !isCurtain(P, r.style)) r.row = NaN;   // anything else new: a free row, not where a fresh build would put it
-        });
+        const ids = [...new Set([...knownIds, ...a.all.map(r => r.id)])];   // everything P6 has brought in so far, removed ones included
         const keep = m.querySelector("#p6Keep")?.checked, sep = m.querySelector("#p6Sep")?.checked;
         const before = P.meta.title || ((P.p6 && P.p6.source) || "Previous").replace(/\.xer$/i, "");
         // nothing changes until the update is applied: then the baseline, the new scenario name and the new file
         previewImport({ rows, lanes, meta: {}, timeline: null, page: null, problems: [], styles: [], fromTool: false, keepLook: true, progress: dataDate ? { dataDate } : undefined,
           onApply: q => {
-            q.p6 = p6;
+            q.p6 = { ...p6, ids };
             if (keep) { q.items.forEach(i => { if (!isCurtain(q, i.style)) { i.bStart = i.start; i.bEnd = i.end; } }); q.progress = { ...prog(), ...(q.progress || {}), baseline: true, baselineSet: todayISO(), baselineName: before }; }
             if (sep) { q.meta.title = p6Scenario(fname) || q.meta.title; if (M.title) q.meta.program = M.title.toUpperCase(); }
           },
@@ -4613,12 +4647,90 @@ function openP6Builder(M, rec, fname, mode, from = null) {
   const tree = m.querySelector("#p6Tree"), sum = m.querySelector("#p6Sum"), prev = m.querySelector("#p6Prev");
   const open = new Set(M.top.kids.map(w => w.path));   // expanded nodes
   const showKids = w => ["lane", "split", "group"].includes(rec[w.path] || "hide");
+  // ---- an update reads the programme first: what's on the sheet, what was removed from it, what this XER changes ----
+  const sheetIds = new Set(P.items.map(i => i.id)), knownIds = new Set((update && P.p6 && P.p6.ids) || []);
+  const revive = new Set(), removedNodes = new Map(), removedMs = new Set();   // brought back by hand / parts and milestones removed on the sheet
+  let A = null, filter = "";   // the latest analysis; the changes line's filter
+  const pathOf = id => { const x = /^(?:WBS|ZONE) (\S+)/.exec(id); return x ? x[1] : null; };
+  function analyse() {
+    const built = p6UpdateRows(M, rec, fname);
+    const known = knownIds.size ? knownIds : new Set(built.rows.filter(r => sheetIds.has(r.id)).map(r => r.id));   // older programmes: what's there
+    const removed = new Set(built.rows.filter(r => known.has(r.id) && !sheetIds.has(r.id) && !revive.has(r.id)).map(r => r.id));
+    const rows = built.rows.filter(r => !removed.has(r.id)), byIdP = new Map(P.items.map(i => [i.id, i]));
+    // a summary on the sheet keeps the dates it has: they follow what's inside it there (some of it may have been taken off)
+    rows.forEach(r => { const i = byIdP.get(r.id); if (i && isContainer(P, i) && i.fitChildren !== false) { r.start = i.start; r.end = i.end; } });
+    const fresh = new Set(rows.filter(r => !byIdP.has(r.id)).map(r => r.id));
+    // (a summary's dates follow what's inside it: its own aren't a change, what's inside moving is)
+    const moved = new Set(rows.filter(r => { const i = byIdP.get(r.id); return i && !isCurtain(P, i.style) && !(isContainer(P, i) && i.fitChildren !== false) && (i.start !== r.start || (!isMs(P, i.style) && i.end !== r.end)); }).map(r => r.id));
+    const builtIds = new Set(built.rows.map(r => r.id));
+    const leaving = new Set(P.items.filter(i => known.has(i.id) && !builtIds.has(i.id)).map(i => i.id));
+    // per WBS part, and rolled up to its parents for the filter
+    const flags = new Map(), sub = new Map(), bump = (path, k) => {
+      if (!path) return;
+      const f = flags.get(path) || flags.set(path, { fresh: 0, removed: 0, moved: 0, leaving: 0, on: 0 }).get(path); f[k]++;
+      if (k === "on") return;
+      const parts = path.split("."); for (let i = 1; i <= parts.length; i++) { const q = parts.slice(0, i).join("."); (sub.get(q) || sub.set(q, new Set()).get(q)).add(k); }
+    };
+    for (const r of built.rows) { const src = r.src || pathOf(r.id); if (removed.has(r.id)) bump(src, "removed"); else if (fresh.has(r.id)) bump(src, "fresh"); else { bump(src, "on"); if (moved.has(r.id)) bump(src, "moved"); } }
+    leaving.forEach(id => bump(pathOf(id), "leaving"));
+    removedNodes.forEach((ids, path) => bump(path, "removed"));
+    return { rows, all: built.rows, lanes: built.lanes, keyMs: built.keyMs, role: built.role, fresh, removed, moved, leaving, flags, sub };
+  }
+  const changeTag = path => {
+    if (!A) return "";
+    if (removedNodes.has(path)) return `<span class="p6tag rem" title="Taken off the sheet since the last import: pick what it shows to bring it back">removed on the sheet</span>`;
+    const f = A.flags.get(path); if (!f) return "";
+    const t = [];
+    if (f.fresh) t.push(`<span class="p6tag new" title="Not on the sheet yet: the update adds it">${f.on ? `+${f.fresh} new` : "new"}</span>`);
+    if (f.moved) t.push(`<span class="p6tag mov" title="On the sheet; this XER moves its dates">dates move</span>`);
+    if (f.removed) t.push(`<span class="p6tag rem" title="Taken off the sheet: they stay off">${f.removed} removed on the sheet · <a href="#" data-revive="${esc(path)}">bring back</a></span>`);
+    if (f.leaving) t.push(`<span class="p6tag lv" title="On the sheet, but not in what this XER makes now">leaving</span>`);
+    if (!t.length && f.on) t.push(`<span class="p6tag on">on the sheet</span>`);
+    return t.join("");
+  };
+  const msTag = t => {
+    if (!A) return "";
+    if (removedMs.has(t.code)) return `<span class="p6tag rem">removed on the sheet</span>`;
+    const v = (rec["~ms"] || {})[t.code], id = v === "gate" ? "GATE " + t.code : t.code;
+    return !v ? "" : A.fresh.has(id) ? `<span class="p6tag new">new</span>` : A.moved.has(id) ? `<span class="p6tag mov">date moves</span>` : sheetIds.has(id) ? `<span class="p6tag on">on the sheet</span>` : "";
+  };
+  if (update && summary()) {
+    // the sheet's own choices: each umbrella's stage source
+    P.items.forEach(i => { if (i.p6path && i.stagesBy) rec["~stages"] = { ...(rec["~stages"] || {}), [i.p6path]: i.stagesBy }; });
+    const a0 = analyse(), bySrc = new Map();
+    a0.all.forEach(r => { const src = r.src || pathOf(r.id); if (src) (bySrc.get(src) || bySrc.set(src, []).get(src)).push(r); });
+    // a part whose rows were all taken off the sheet (with nothing under it still there) opens as Leave out
+    for (const [path, rs] of bySrc) {
+      if (!rs.every(r => a0.removed.has(r.id)) || !M.nodes.some(w => w.path === path)) continue;
+      if (a0.all.some(r => (r.src || "").startsWith(path + ".") && sheetIds.has(r.id))) continue;
+      removedNodes.set(path, rs.map(r => r.id)); rec[path] = "hide";
+    }
+    // key dates, picked milestones, the phase band and the zones taken off the sheet: left out too
+    for (const t of a0.keyMs) { const role = a0.role(t), id = role === "gate" ? "GATE " + t.code : role === "ms" ? t.code : null; if (id && a0.removed.has(id)) { rec["~dates"] = { ...(rec["~dates"] || {}), [t.code]: "hide" }; removedMs.add(t.code); } }
+    Object.entries(rec["~ms"] || {}).forEach(([code, v]) => { if (v === "here" && a0.removed.has(code)) { const all = { ...rec["~ms"] }; delete all[code]; rec["~ms"] = all; removedMs.add(code); } });
+    if (["BAND 1", "BAND 2", "BAND 3"].some(id => a0.removed.has(id))) rec["~band"] = { ...(rec["~band"] || {}), on: false };
+    if (a0.removed.has("ZONE CONT")) rec["~cont"] = false;
+    if (a0.removed.has("ZONE PC")) rec["~pc"] = false;
+  }
   let prevTimer = 0;
   const drawPreview = () => {
     clearTimeout(prevTimer);
     prevTimer = setTimeout(() => {
       if (!prev.isConnected) return;
       try {
+        if (update && A) {   // your programme as it is, with this update on it
+          const svg = p6PreviewSvg(p6MergedProject(A.rows), prev.clientWidth || 1000);
+          prev.innerHTML = `<p class="p6legend"><span class="k new"></span> new <span class="k mov"></span> dates move <span class="k lv"></span> leaving</p>`;
+          prev.appendChild(svg);
+          const mark = (ids, cls) => ids.forEach(id => {
+            const g = [...svg.querySelectorAll("g[data-id]")].find(x => x.getAttribute("data-id") === id); if (!g) return;
+            if (cls === "lv") { g.setAttribute("opacity", ".3"); return; }
+            const b = g.getBBox(); if (!b.width && !b.height) return;
+            el("rect", { x: b.x - 2, y: b.y - 2, width: b.width + 4, height: b.height + 4, fill: "none", stroke: cls === "new" ? "#1A9E4A" : "#E8820C", "stroke-width": 2, "stroke-dasharray": cls === "new" ? null : "4 2", rx: 2 }, svg);
+          });
+          mark(A.leaving, "lv"); mark(A.moved, "mov"); mark(A.fresh, "new");
+          return;
+        }
         const { p } = p6MakeProject(M, rec, fname);
         prev.innerHTML = "";
         if (!p) { prev.innerHTML = `<p class="note">Nothing selected yet.</p>`; return; }
@@ -4636,9 +4748,18 @@ function openP6Builder(M, rec, fname, mode, from = null) {
   const paint = () => {
     m.querySelectorAll("[data-style]").forEach(b => b.setAttribute("aria-pressed", (rec["~style"] || "detailed") === b.dataset.style));
     const modes = summary() ? P6_MODES_SUMMARY : P6_MODES;
+    if (update) {
+      A = analyse();
+      const chg = m.querySelector("#p6Chg"), n = { fresh: A.fresh.size, moved: A.moved.size, removed: A.removed.size + [...removedNodes.values()].reduce((k, v) => k + v.length, 0), leaving: A.leaving.size };
+      const chip = (k, label, cls) => n[k] ? `<button type="button" class="p6tag ${cls} ${filter === k ? "on" : ""}" data-filter="${k}" aria-pressed="${filter === k}">${n[k]} ${label}</button>` : "";
+      chg.innerHTML = `<b>This XER against your programme:</b> ${[chip("fresh", "new", "new"), chip("moved", "dates move", "mov"), chip("removed", "removed on the sheet (kept off)", "rem"), chip("leaving", "leaving", "lv")].filter(Boolean).join(" ") || "nothing changes"}${filter ? ` <a href="#" data-filter="">show everything</a>` : ""}`;
+      if (filter && !n[filter]) filter = "";
+      if (filter) for (const [path, ks] of A.sub) if (ks.has(filter)) open.add(path);   // open the way to what's filtered
+    }
     const rows = [], scroll = tree.scrollTop;
     const add = (w, ctx = {}) => {   // ctx: { taken: why it has no choice of its own } or { inBox: true }
       const r = p6Roll(M, w); if (!r.all.length) return;
+      if (filter && A && !(A.sub.get(w.path) || new Set()).has(filter)) return;   // the changes line's filter
       // milestones to offer here: a part drawn as one thing (umbrella, bar, zone) lists every milestone inside it, straight under it;
       // elsewhere a part lists its own
       const md = rec[w.path] || "hide", whole = !ctx.taken && ["umbrella", "bar", "zone"].includes(md), live = t => M.includeAll || !M.out.has(t);
@@ -4652,27 +4773,29 @@ function openP6Builder(M, rec, fname, mode, from = null) {
       })() : "";
       rows.push(`<div class="p6row ${md === "hide" || ctx.taken ? "off" : ""}" style="--d:${w.depth - 1}">
         <button type="button" class="p6tog" data-tog="${esc(w.path)}" ${kidsHere ? "" : "disabled"} aria-label="${open.has(w.path) ? "Collapse" : "Expand"}">${kidsHere ? (open.has(w.path) ? "▾" : "▸") : ""}</button>
-        <span class="p6name" title="${esc(w.path)} · ${esc(w.name)}"><span class="p6title"><span class="p6code">${esc(w.code)}</span> ${esc(w.name)}</span>${extra}</span>
+        <span class="p6name" title="${esc(w.path)} · ${esc(w.name)}"><span class="p6title"><span class="p6code">${esc(w.code)}</span> ${esc(w.name)}</span>${changeTag(w.path)}${extra}</span>
         <span class="p6meta">${r.s ? `${fmt(r.s)} – ${fmt(r.e)}` : ""}<br>${r.work.length} act${r.ms.length ? ` · ${r.ms.length} ms` : ""}${r.left ? ` · <span class="warn" title="Unlinked activities at the data date, left out of the dates">${r.left} left out</span>` : ""}</span>
         ${ctx.taken ? `<span class="note p6taken">${ctx.taken}</span>` : `<select data-mode="${esc(w.path)}" aria-label="What ${esc(w.name)} shows">${here.map(([v, n]) => `<option value="${v}" ${v === md ? "selected" : ""}>${n}</option>`).join("")}${here.some(([v]) => v === md) ? "" : `<option value="${esc(md)}" selected>${esc((modes.find(([v]) => v === md) || [md, md])[1])}</option>`}</select>`}</div>`);
       if (!open.has(w.path)) return;
       if (!summary()) { if (showKids(w) || md === "hide") w.kids.forEach(k => add(k)); return; }
       const picks = rec["~ms"] || {};
       const msRow = t => `<div class="p6row p6msrow ${picks[t.code] ? "" : "off"}" style="--d:${w.depth}">
-        <span></span><span class="p6name" title="${esc(t.code)} · ${esc(t.name)}"><span class="p6title"><span class="p6dia" aria-hidden="true">◆</span> ${esc(t.name)}</span></span>
+        <span></span><span class="p6name" title="${esc(t.code)} · ${esc(t.name)}"><span class="p6title"><span class="p6dia" aria-hidden="true">◆</span> ${esc(t.name)}</span>${msTag(t)}</span>
         <span class="p6meta">${fmt(t.start)}<br>${t.wbs && t.wbs !== w ? esc(t.wbs.name) : "milestone"}</span>
         <select data-ms="${esc(t.code)}" aria-label="What ${esc(t.name)} shows">${P6_MS_CHOICES.map(([v, n]) => `<option value="${v}" ${(picks[t.code] || "off") === v ? "selected" : ""}>${n}</option>`).join("")}</select></div>`;
-      if (whole) ownMs.forEach(t => rows.push(msRow(t)));   // first, before its parts
+      // with a filter on, only the milestones it's about
+      const msIn = t => { if (!filter || !A) return true; const v = (rec["~ms"] || {})[t.code], id = v === "gate" ? "GATE " + t.code : t.code; return filter === "removed" ? removedMs.has(t.code) || A.removed.has(id) : filter === "fresh" ? !!v && A.fresh.has(id) : filter === "moved" ? !!v && A.moved.has(id) : filter === "leaving" ? A.leaving.has(id) : true; };
+      if (whole) ownMs.filter(msIn).forEach(t => rows.push(msRow(t)));   // first, before its parts
       // what its parts can be: chosen one by one (lane, box, not shown), or taken by it (umbrella, bar, zone…)
       const kidCtx = ctx.taken ? { taken: ctx.taken, keyDates: ctx.keyDates, msShown: ctx.msShown } : md === "group" ? { inBox: true } : md === "split" ? { inBox: !!ctx.inBox } : md === "lane" ? {} : { taken: P6_TAKEN[md] || "in the part above", keyDates: md === "ms", msShown: whole };
       w.kids.forEach(k => add(k, kidCtx));
       // its own milestones: each can be picked, wherever it sits
-      if (!whole) ownMs.forEach(t => rows.push(msRow(t)));
+      if (!whole) ownMs.filter(msIn).forEach(t => rows.push(msRow(t)));
     };
     M.top.kids.forEach(add);
     tree.innerHTML = rows.join(""); tree.scrollTop = scroll;
     // what it will make, and (summary) the key dates
-    const built = summary() ? p6BuildSummary(M, rec) : p6Build(M, rec), items = built.rows, lanes = built.lanes;
+    const built = A ? { rows: A.all, lanes: A.lanes, keyMs: A.keyMs, role: A.role } : summary() ? p6BuildSummary(M, rec) : p6Build(M, rec), items = built.rows, lanes = built.lanes;
     const count = (its, test, w) => { const n = its.filter(test).length; return n ? `${n} ${w}${n > 1 ? "s" : ""}` : ""; };
     const per = lanes.map(l => { const its = items.filter(i => i.lane === l.name);
       return `<li><b>${esc(l.name)}</b><span class="note">${[count(its, i => /^U_/.test(i.style), "umbrella"), count(its, i => i.style === "SUMMARY_BOX", "summary box"), count(its, i => i.style === "BAR" && !i.parent, "bar"), count(its, i => i.style === "BAR" && i.parent && !its.some(b => b.id === i.parent && b.style === "SUMMARY_BOX"), "stage"), count(its, i => /^POS_/.test(i.style), "possession"), count(its, i => /^ML_/.test(i.style), "milestone")].filter(Boolean).join(", ")}</span></li>`; }).join("");
@@ -4707,11 +4830,13 @@ function openP6Builder(M, rec, fname, mode, from = null) {
   };
   tree.addEventListener("change", e => {
     const s = e.target.closest("[data-mode]"), st = e.target.closest("[data-stages]"), sp = e.target.closest("[data-split]"), ms = e.target.closest("[data-ms]");
+    if (ms && removedMs.has(ms.dataset.ms) && ms.value !== "off") { removedMs.delete(ms.dataset.ms); revive.add(ms.dataset.ms); revive.add("GATE " + ms.dataset.ms); }
     if (ms) {   // a milestone picked from the tree; its key-dates role follows the pick
       const all = { ...(rec["~ms"] || {}) }; if (ms.value === "off") delete all[ms.dataset.ms]; else all[ms.dataset.ms] = ms.value; rec["~ms"] = all;
       if (rec["~dates"]) { const d = { ...rec["~dates"] }; delete d[ms.dataset.ms]; rec["~dates"] = d; }
     }
     if (s) {
+      if (removedNodes.has(s.dataset.mode) && s.value !== "hide") { removedNodes.get(s.dataset.mode).forEach(id => revive.add(id)); removedNodes.delete(s.dataset.mode); }   // brought back
       rec[s.dataset.mode] = s.value; if (["lane", "split", "group"].includes(s.value)) open.add(s.dataset.mode);
       if (s.value === "group") { const w = M.nodes.find(x => x.path === s.dataset.mode); (w ? w.kids : []).forEach(k => { const n = p6Roll(M, k).work.length; if (!["umbrella", "bar", "split", "hide"].includes(rec[k.path])) rec[k.path] = n >= 3 ? "umbrella" : n ? "bar" : "hide"; }); }
     }
@@ -4719,7 +4844,12 @@ function openP6Builder(M, rec, fname, mode, from = null) {
     if (sp) rec["~split"] = { ...(rec["~split"] || {}), [sp.dataset.split]: sp.checked };
     paint();
   });
-  tree.addEventListener("click", e => { const b = e.target.closest("[data-tog]"); if (!b) return; const k = b.dataset.tog; open.has(k) ? open.delete(k) : open.add(k); paint(); });
+  tree.addEventListener("click", e => {
+    const rv = e.target.closest("[data-revive]");
+    if (rv && A) { e.preventDefault(); A.all.filter(r => (r.src || pathOf(r.id)) === rv.dataset.revive && A.removed.has(r.id)).forEach(r => revive.add(r.id)); paint(); return; }   // the removed parts come back
+    const b = e.target.closest("[data-tog]"); if (!b) return; const k = b.dataset.tog; open.has(k) ? open.delete(k) : open.add(k); paint();
+  });
+  if (update) m.querySelector("#p6Chg").addEventListener("click", e => { const b = e.target.closest("[data-filter]"); if (!b) return; e.preventDefault(); filter = filter === b.dataset.filter ? "" : b.dataset.filter; paint(); });
   m.querySelectorAll("[data-style]").forEach(b => b.onclick = () => {
     if ((rec["~style"] || "detailed") === b.dataset.style) return;
     Object.keys(rec).forEach(k => delete rec[k]);
