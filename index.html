@@ -6,10 +6,11 @@
 <title>PoaP Builder</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Roboto+Condensed:wght@500;700&display=swap">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://unpkg.com/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
+<!-- fonts and the Excel / PDF libraries load in the background: the page opens at once, even on a slow connection -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Roboto+Condensed:wght@500;700&display=swap" media="print" onload="this.media='all'">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script defer src="https://unpkg.com/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
 <script src="brand-logo.js"></script>
 <script src="channel.js"></script>
 <style>
@@ -5508,6 +5509,10 @@ document.fonts?.ready.then(() => { render(); });
 render(); renderSide(); showStatus();
 showStartScreen();
 window.POAP_READY = true;   // the whole script ran (the tests check this)
+// the fonts arrive in the background: draw again once they're in, so labels are measured with them
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { try { if (P) render(); } catch (e) {} });
+// an export before the Excel / PDF libraries have arrived says so, instead of failing quietly
+window.addEventListener("error", e => { if (/XLSX|jspdf|svg2pdf/i.test(String(e.message))) toast("The Excel / PDF tools are still downloading. Try again in a moment.", 5000); });
 </script>
 </body>
 </html>
